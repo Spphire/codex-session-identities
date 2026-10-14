@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.2 - 2026-10-14
+
+- Add official-account device authorization in the identity sidebar, using an isolated original-CLI login process and automatic email registration.
+- Report the installed CLI version during Desktop and direct backend initialization, so paginated chats use the supported native fork route instead of the source-build fallback.
+- Report that version during remote-control device enrollment. Refresh cached registrations on startup while retaining existing pairing IDs; preserve cached pairing if refresh fails or returns different IDs.
+- Include a third replayable upstream patch and compatibility regression checks.
+
 ## 0.1.1 - 2026-10-14
 
 - Merge duplicate official profiles by verified account and user IDs, retaining existing binding aliases. Never merge by email alone.

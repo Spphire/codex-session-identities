@@ -1,0 +1,206 @@
+diff --git a/codex-rs/app-server-transport/src/transport/remote_control/protocol.rs b/codex-rs/app-server-transport/src/transport/remote_control/protocol.rs
+index e3c122c..c31f255 100644
+--- a/codex-rs/app-server-transport/src/transport/remote_control/protocol.rs
++++ b/codex-rs/app-server-transport/src/transport/remote_control/protocol.rs
+@@ -21,7 +21,7 @@ pub(super) struct EnrollRemoteServerRequest {
+     pub(super) name: String,
+     pub(super) os: &'static str,
+     pub(super) arch: &'static str,
+-    pub(super) app_server_version: &'static str,
++    pub(super) app_server_version: String,
+     pub(super) installation_id: String,
+ }
+ 
+diff --git a/codex-rs/app-server-transport/src/transport/remote_control/server_api.rs b/codex-rs/app-server-transport/src/transport/remote_control/server_api.rs
+index badf35a..eb5a9de 100644
+--- a/codex-rs/app-server-transport/src/transport/remote_control/server_api.rs
++++ b/codex-rs/app-server-transport/src/transport/remote_control/server_api.rs
+@@ -24,6 +24,47 @@ use tracing::warn;
+ const REMOTE_CONTROL_RETRY_AFTER_JITTER_MAX_MILLIS: u64 = 30_000;
+ 
+ const REMOTE_CONTROL_ENROLL_TIMEOUT: Duration = Duration::from_secs(30);
++
++pub(super) fn enrollment_client_version(installed: Option<&str>) -> String {
++    let valid = installed.filter(|version| {
++        let mut segments = version.splitn(2, '-');
++        let core = segments.next().unwrap_or_default();
++        let numbers: Vec<_> = core.split('.').collect();
++        core != "0.0.0"
++            && numbers.len() == 3
++            && numbers
++                .iter()
++                .all(|part| !part.is_empty() && part.bytes().all(|byte| byte.is_ascii_digit()))
++            && segments.next().is_none_or(|suffix| {
++                !suffix.is_empty()
++                    && suffix
++                        .bytes()
++                        .all(|byte| byte.is_ascii_alphanumeric() || byte == b'.' || byte == b'-')
++            })
++    });
++    valid.unwrap_or(env!("CARGO_PKG_VERSION")).to_owned()
++}
++
++#[cfg(test)]
++#[test]
++fn enrollment_uses_installed_client_version_with_compiled_fallback() {
++    assert_eq!(
++        enrollment_client_version(Some("0.162.0-alpha.17.2")),
++        "0.162.0-alpha.17.2"
++    );
++    for invalid in [
++        None,
++        Some("0.0.0"),
++        Some("not-a-version"),
++        Some("1.2.3\n"),
++        Some("1.2.3-"),
++    ] {
++        assert_eq!(
++            enrollment_client_version(invalid),
++            env!("CARGO_PKG_VERSION")
++        );
++    }
++}
+ const REMOTE_CONTROL_SERVER_TOKEN_REFRESH_BACKOFF_MIN_SECS: u64 = 24;
+ const REMOTE_CONTROL_SERVER_TOKEN_REFRESH_BACKOFF_MAX_SECS: u64 = 36;
+ 
+@@ -99,7 +140,11 @@ pub(super) async fn enroll_remote_control_server(
+         name: server_name.to_string(),
+         os: std::env::consts::OS,
+         arch: std::env::consts::ARCH,
+-        app_server_version: env!("CARGO_PKG_VERSION"),
++        app_server_version: enrollment_client_version(
++            std::env::var("CODEX_IDENTITY_CLIENT_VERSION")
++                .ok()
++                .as_deref(),
++        ),
+         installation_id: installation_id.to_string(),
+     };
+     let enrollment_response = send_remote_control_server_request::<_, EnrollRemoteServerResponse>(
+@@ -136,6 +181,36 @@ pub(super) async fn refresh_remote_control_server(
+     installation_id: &str,
+     enrollment: &mut RemoteControlEnrollment,
+ ) -> io::Result<()> {
++    // Cached enrollments lack a version field. Refresh once before obtaining their first token.
++    if enrollment.remote_control_token.is_none()
++        && env!("CARGO_PKG_VERSION") == "0.0.0"
++        && enrollment_client_version(
++            std::env::var("CODEX_IDENTITY_CLIENT_VERSION")
++                .ok()
++                .as_deref(),
++        ) != "0.0.0"
++    {
++        match enroll_remote_control_server(
++            &enrollment.remote_control_target,
++            auth,
++            installation_id,
++            &enrollment.server_name,
++        )
++        .await
++        {
++            Ok(updated)
++                if updated.server_id == enrollment.server_id
++                    && updated.environment_id == enrollment.environment_id =>
++            {
++                *enrollment = updated;
++                return Ok(());
++            }
++            Ok(_) => warn!(
++                "Remote version refresh returned different device IDs; preserving cached pairing"
++            ),
++            Err(_) => warn!("Remote version refresh failed; preserving cached pairing"),
++        }
++    }
+     let now = OffsetDateTime::now_utc();
+     let refresh_requirement = enrollment.server_token_refresh_requirement_at(now);
+     if refresh_requirement == RemoteControlServerTokenRefreshRequirement::NotNeeded {
+diff --git a/codex-rs/app-server-transport/src/transport/remote_control/tests.rs b/codex-rs/app-server-transport/src/transport/remote_control/tests.rs
+index 490ac1e..770449b 100644
+--- a/codex-rs/app-server-transport/src/transport/remote_control/tests.rs
++++ b/codex-rs/app-server-transport/src/transport/remote_control/tests.rs
+@@ -1767,7 +1767,7 @@ async fn remote_control_http_mode_enrolls_before_connecting() {
+             "name": expected_server_name,
+             "os": std::env::consts::OS,
+             "arch": std::env::consts::ARCH,
+-            "app_server_version": env!("CARGO_PKG_VERSION"),
++            "app_server_version": super::server_api::enrollment_client_version(std::env::var("CODEX_IDENTITY_CLIENT_VERSION").ok().as_deref()),
+             "installation_id": TEST_INSTALLATION_ID,
+         })
+     );
+@@ -1954,6 +1954,12 @@ async fn remote_control_http_mode_enrolls_before_connecting() {
+ 
+ #[tokio::test]
+ async fn remote_control_http_mode_refreshes_persisted_enrollment_before_connecting() {
++    let compatibility_version = super::server_api::enrollment_client_version(
++        std::env::var("CODEX_IDENTITY_CLIENT_VERSION")
++            .ok()
++            .as_deref(),
++    );
++    let update_version = env!("CARGO_PKG_VERSION") == "0.0.0" && compatibility_version != "0.0.0";
+     let listener = TcpListener::bind("127.0.0.1:0")
+         .await
+         .expect("listener should bind");
+@@ -2003,9 +2009,14 @@ async fn remote_control_http_mode_refreshes_persisted_enrollment_before_connecti
+     .expect("remote control should start");
+ 
+     let refresh_request = accept_http_request(&listener).await;
++    let expected_path = if update_version {
++        "/backend-api/wham/remote/control/server/enroll"
++    } else {
++        "/backend-api/wham/remote/control/server/refresh"
++    };
+     assert_eq!(
+         refresh_request.request_line,
+-        "POST /backend-api/wham/remote/control/server/refresh HTTP/1.1"
++        format!("POST {expected_path} HTTP/1.1")
+     );
+     assert_eq!(
+         refresh_request.headers.get("authorization"),
+@@ -2023,13 +2034,16 @@ async fn remote_control_http_mode_refreshes_persisted_enrollment_before_connecti
+             .get_all(REMOTE_CONTROL_INSTALLATION_ID_HEADER),
+         vec![TEST_INSTALLATION_ID]
+     );
++    let expected_body = if update_version {
++        let server_name = gethostname().to_string_lossy().trim().to_string();
++        json!({"name": server_name, "os": std::env::consts::OS, "arch": std::env::consts::ARCH, "app_server_version": compatibility_version, "installation_id": TEST_INSTALLATION_ID})
++    } else {
++        json!({"server_id": persisted_enrollment.server_id, "installation_id": TEST_INSTALLATION_ID})
++    };
+     assert_eq!(
+         serde_json::from_str::<serde_json::Value>(&refresh_request.body)
+             .expect("refresh body should deserialize"),
+-        json!({
+-            "server_id": persisted_enrollment.server_id.clone(),
+-            "installation_id": TEST_INSTALLATION_ID,
+-        })
++        expected_body
+     );
+     respond_with_json(
+         refresh_request.stream,
+diff --git a/codex-rs/login/src/auth/default_client.rs b/codex-rs/login/src/auth/default_client.rs
+index 28a952e..baf08db 100644
+--- a/codex-rs/login/src/auth/default_client.rs
++++ b/codex-rs/login/src/auth/default_client.rs
+@@ -153,7 +153,22 @@ pub fn get_codex_user_agent() -> String {
+     // OS discovery can spawn subprocesses on Linux. Reuse it across requests,
+     // while continuing to read the mutable originator and suffix below.
+     static OS_INFO: LazyLock<os_info::Info> = LazyLock::new(os_info::get);
+-    let build_version = env!("CARGO_PKG_VERSION");
++    let installed_version = std::env::var("CODEX_IDENTITY_CLIENT_VERSION").ok();
++    let build_version = installed_version
++        .as_deref()
++        .filter(|version| {
++            let core = version.split('-').next().unwrap_or_default();
++            let numbers: Vec<_> = core.split('.').collect();
++            core != "0.0.0"
++                && numbers.len() == 3
++                && numbers
++                    .iter()
++                    .all(|part| !part.is_empty() && part.bytes().all(|byte| byte.is_ascii_digit()))
++                && version
++                    .bytes()
++                    .all(|byte| byte.is_ascii_alphanumeric() || byte == b'.' || byte == b'-')
++        })
++        .unwrap_or(env!("CARGO_PKG_VERSION"));
+     let os_info = &*OS_INFO;
+     let originator = originator();
+     let prefix = format!(

@@ -7,6 +7,7 @@ const crypto = require('node:crypto');
 const { spawn, spawnSync } = require('node:child_process');
 const { createInterface } = require('node:readline');
 const { InstalledModelCatalog, mergePage, validParams } = require('./model-catalog-compat.cjs');
+const {initializeResult} = require('./client-version-compat.cjs');
 
 const originalArgs = process.argv.slice(2);
 let config={};
@@ -89,7 +90,7 @@ function startBridge() {
     let value;try{value=JSON.parse(line);}catch{process.stderr.write('Invalid backend RPC frame\n');return;}
     if (!value.method && value.id != null && routes.has(value.id)) {
       const route=routes.get(value.id);routes.delete(value.id);
-      if(route.initialize && !value.error){ready=true;for(const client of clients)send(client,{ready,pid:child.pid,protocol:1});}
+      if(route.initialize && !value.error){value.result=initializeResult(value.result,backendEnv.CODEX_IDENTITY_CLIENT_VERSION);ready=true;for(const client of clients)send(client,{ready,pid:child.pid,protocol:1});}
       if(route.originalModels && !value.error){
         const page=mergePage(value.result,route.originalModels,route.modelParams);
         if(page)send(route.destination,{...page,id:route.id});

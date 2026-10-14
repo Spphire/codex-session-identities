@@ -10,6 +10,7 @@ import assert from 'node:assert/strict';
 
 if (!process.argv[2]) throw new Error('Pass the patched codex-app-server.exe path');
 const executable = resolve(process.argv[2]);
+const bridgeDirectory=process.argv[4]&&resolve(process.argv[4]);
 const historyMode = process.argv[3] || 'paginated';
 assert.ok(['legacy','paginated'].includes(historyMode));
 const directory = await mkdtemp(join(tmpdir(), 'codex-identity-smoke-'));
@@ -48,7 +49,7 @@ function connect() {
   const env={...process.env,CODEX_HOME:directory,RUST_MIN_STACK:'33554432',NO_PROXY:'127.0.0.1,localhost,::1',no_proxy:'127.0.0.1,localhost,::1'};
   env.CODEX_IDENTITY_CLIENT_VERSION='0.162.0-alpha.17.2';
   for(const key of ['CODEX_ACCESS_TOKEN','CODEX_API_KEY','OPENAI_API_KEY'])delete env[key];
-  const child=spawn(executable,['--listen','stdio://'],{env,cwd:directory,windowsHide:true,stdio:['pipe','pipe','pipe']});
+  const child=spawn(bridgeDirectory?process.execPath:executable,bridgeDirectory?[join(bridgeDirectory,'runtime-bridge.cjs'),'app-server','--listen','stdio://']:['--listen','stdio://'],{env,cwd:directory,windowsHide:true,stdio:['pipe','pipe','pipe']});
   const waiters=new Map();const events=[];let sequence=0;let errors='';
   child.stderr.on('data',chunk=>{errors=(errors+chunk.toString()).slice(-12000);});
   child.on('exit',()=>{for(const w of waiters.values()){clearTimeout(w.timer);w.reject(new Error(`Runtime exited: ${errors}`));}waiters.clear();});
@@ -71,7 +72,8 @@ function connect() {
 
 async function initialized() {
   const connection=connect();
-  await connection.call('initialize',{clientInfo:{name:'identity_smoke',version:'0.1.0'},capabilities:{experimentalApi:true}});
+  const initialized=await connection.call('initialize',{clientInfo:{name:'identity_smoke',version:'0.1.0'},capabilities:{experimentalApi:true}});
+  if(bridgeDirectory)assert.match(initialized.userAgent,/\/0\.162\.0-alpha\.17\.2\s/,'Desktop must receive the installed backend capability version');
   connection.child.stdin.write(JSON.stringify({method:'initialized',params:{}})+'\n');
   return connection;
 }
@@ -122,6 +124,7 @@ try {
   const fork=(await rpc.call('thread/fork',{threadId:first,excludeTurns:true})).thread.id;
   assert.equal((await rpc.call('thread/identity/read',{threadId:fork})).identityId,'b');
   await (await turn(fork,'fork_keeps_identity'))();assert.equal(requests.at(-1).label,'b');
+  assert.ok(JSON.stringify(requests.at(-1).body).includes('history_marker_first'),'Fork must inherit actual conversation context');
   await rpc.close();rpc=await initialized();
   const resumed=await rpc.call('thread/resume',{threadId:first,excludeTurns:true});
   assert.equal(resumed.thread.id,first);

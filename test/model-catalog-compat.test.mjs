@@ -35,7 +35,7 @@ for(const mode of ['available','unavailable','native-denied'])test(`bridge catal
   const available=mode!=='unavailable';
   const directory=await mkdtemp(join(tmpdir(),'identity-catalog-'));
   const config={originalCodexExe:process.execPath,appServerExe:process.execPath};
-  for(const name of ['runtime-bridge.cjs','model-catalog-compat.cjs','stdio-client.mjs'])await copyFile(resolve(name),join(directory,name));
+  for(const name of ['runtime-bridge.cjs','model-catalog-compat.cjs','client-version-compat.cjs','stdio-client.mjs'])await copyFile(resolve(name),join(directory,name));
   await writeFile(join(directory,'runtime-config.json'),JSON.stringify(config));
   const responder=(data)=>`require('node:readline').createInterface({input:process.stdin}).on('line',line=>{const v=JSON.parse(line);if(v.id==null)return;const reply=v.method==='model/list'?${JSON.stringify(data)}:{};process.stdout.write(JSON.stringify({id:v.id,result:reply})+'\\n');});`;
   await writeFile(join(directory,'app-server'),available?responder({data:installed,nextCursor:null}):'process.exit(1);');
