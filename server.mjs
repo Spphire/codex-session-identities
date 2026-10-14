@@ -6,12 +6,14 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { readCatalog } from './catalog.mjs';
 import {removeIdentity} from './identity-management.mjs';
+import {OfficialLogin} from './official-login.mjs';
 import { BridgeClient } from './bridge-client.mjs';
 import { SwitchCoordinator } from './switch-coordinator.mjs';
 import { existsSync } from 'node:fs';
 
 const root = dirname(fileURLToPath(import.meta.url));
-export function panelServer({ codexDirectory, switcherDirectory, accessToken=randomBytes(32).toString('hex') }) {
+export function panelServer({ codexDirectory, switcherDirectory, originalCodexExe, accessToken=randomBytes(32).toString('hex') }) {
+  const login=new OfficialLogin(codexDirectory,originalCodexExe);
   const bridge = new BridgeClient(codexDirectory);
   let coordinator=existsSync(join(codexDirectory,'session-identities','panel-bindings.sqlite'))?new SwitchCoordinator(codexDirectory,bridge):null;
   const observed=new Map();
@@ -36,6 +38,12 @@ export function panelServer({ codexDirectory, switcherDirectory, accessToken=ran
       if(supplied.length!==expected.length||!timingSafeEqual(supplied,expected)){json(401,{error:'面板访问未授权'});return;}
     }
     try {
+      if(req.url==='/api/official-login'&&req.method==='GET'){json(200,login.view());return;}
+      if(req.method==='POST'&&['/api/official-login/start','/api/official-login/cancel'].includes(req.url)){
+        if(req.headers.origin!==`http://${host}`||!req.headers['content-type']?.startsWith('application/json')){json(403,{error:'仅接受面板内操作'});return;}
+        let size=0;for await(const chunk of req){size+=chunk.length;if(size>4096){json(413,{error:'请求过大'});return;}}
+        json(200,await exclusive(()=>req.url.endsWith('/start')?login.start():login.cancel()));return;
+      }
       if(req.method==='POST'&&req.url==='/api/identities/remove'){
         if(req.headers.origin!==`http://${host}`||!req.headers['content-type']?.startsWith('application/json')){json(403,{error:'仅接受面板内操作'});return;}
         let body='';for await(const chunk of req){body+=chunk;if(Buffer.byteLength(body)>4096){json(413,{error:'请求过大'});return;}}
@@ -93,7 +101,7 @@ export function panelServer({ codexDirectory, switcherDirectory, accessToken=ran
       json(500, { error: error instanceof SyntaxError?'请求格式无效':String(error.message || '身份操作失败') });
     }
   });
-  server.on('close',()=>{coordinator?.close();bridge.close();});
+  server.on('close',()=>{coordinator?.close();bridge.close();void login.cancel().catch(()=>{});});
   Object.defineProperty(server,'identityAccessToken',{value:accessToken});
   return server;
 }
@@ -106,7 +114,8 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
     const saved=JSON.parse(await readFile(join(codexDirectory,'session-identities',`panel-access-${port}.json`),'utf8'));
     if(saved.port===port && typeof saved.token==='string' && /^[a-f0-9]{64}$/.test(saved.token))accessToken=saved.token;
   }catch{}
-  const server = panelServer({ codexDirectory, accessToken, switcherDirectory: process.env.CODEX_IDENTITY_SWITCHER_HOME || join(codexDirectory, 'identity-switcher') });
+  let originalCodexExe;try{originalCodexExe=JSON.parse(await readFile(join(root,'runtime-config.json'),'utf8')).originalCodexExe;}catch{}
+  const server = panelServer({ codexDirectory, accessToken, originalCodexExe, switcherDirectory: process.env.CODEX_IDENTITY_SWITCHER_HOME || join(codexDirectory, 'identity-switcher') });
   server.listen(port, '127.0.0.1', async () => {
     const directory=join(codexDirectory,'session-identities');await mkdir(directory,{recursive:true});
     await writeFile(join(directory,`panel-access-${server.address().port}.json`),JSON.stringify({port:server.address().port,token:server.identityAccessToken,pid:process.pid}),{mode:0o600});

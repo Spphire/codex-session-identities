@@ -6,6 +6,7 @@ New-Item -ItemType Directory -Path $payload -Force|Out-Null
 $files=@('server.mjs','catalog.mjs','bindings.mjs','switch-coordinator.mjs','bridge-client.mjs','runtime-bridge.cjs','runtime-status.mjs','stdio-client.mjs','open-panel.mjs','import-profiles.mjs','register-system-official.mjs','official-vault.ps1','export-compat.mjs','Launch-Codex.ps1','Disable.ps1','codex-identity.exe','codex-identity-credential.exe','identity-panel.exe','package.json')
 $files+='model-catalog-compat.cjs'
 $files+='identity-management.mjs'
+$files+='official-login.mjs'
 $files+='Open-PanelWindow.ps1'
 $files+='codex-session-desktop.exe'
 $files+='identity-tray.exe'

@@ -61,10 +61,28 @@ async function refresh(){
     if(previous)$('identity').value=previous.runtimeId;
     else $('identity').value=state.identities.find(x=>!x.removed&&x.available)?.runtimeId||'';
     $('updated').textContent=`更新于 ${new Date(state.observedAt).toLocaleTimeString('zh-CN')}`;
-    renderRows();renderDetail();await loadIdentity();
+    renderRows();renderDetail();await loadIdentity();await loginStatus();
   }catch(error){$('error').textContent=error.message; $('error').hidden=false; $('connection').textContent='连接失败';}
   finally{refreshing=false;$('refresh').disabled=false;}
 }
+async function loginStatus(){
+  const response=await apiFetch('/api/official-login');const value=await response.json();if(!response.ok)throw new Error(value.error);
+  const busy=['starting','waiting'].includes(value.status);$('add-official').disabled=busy;
+  $('official-login').hidden=value.status==='idle';$('cancel-login').hidden=!busy;
+  $('login-code').textContent=value.userCode||'';$('login-code').hidden=!value.userCode;
+  $('login-url').hidden=!value.verificationUrl;
+  if(value.verificationUrl)$('login-url').href=value.verificationUrl;
+  $('login-status').textContent=value.status==='waiting'?'使用要添加的官方账号授权':value.status==='completed'?`已添加 ${value.name}`:value.error||({starting:'正在申请设备码',cancelled:'已取消登录',expired:'设备码已过期，请重试'}[value.status]||'');
+}
+async function officialLogin(cancel=false){
+  $('add-official').disabled=true;$('cancel-login').disabled=true;
+  try{
+    const response=await apiFetch(cancel?'/api/official-login/cancel':'/api/official-login/start',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});
+    const value=await response.json();if(!response.ok)throw new Error(value.error);await loginStatus();
+  }catch(error){$('error').textContent=error.message;$('error').hidden=false;$('add-official').disabled=false;}
+  finally{$('cancel-login').disabled=false;}
+}
+$('add-official').addEventListener('click',()=>officialLogin());$('cancel-login').addEventListener('click',()=>officialLogin(true));
 async function removeIdentity(identity){
   if(deleting||!confirm(`从面板移除“${identity.name}”${identity.memberIds.length>1?`的 ${identity.memberIds.length} 份档案`:''}？\n登录凭据会保留，不会注销账号。`))return;
   deleting=true;
