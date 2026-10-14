@@ -24,7 +24,7 @@ const system=profiles.find(x=>x.kind==='chatgpt-system'&&x.accountId===hostAuth.
 const independent=profiles.find(x=>x.kind==='chatgpt'&&x.accountId===system?.accountId&&x.userId===system?.userId);
 const api=profiles.find(x=>x.id===apiId&&x.kind==='api');assert.ok(system&&independent&&api,'Matching official aliases and API profile required');
 const privatePath=join(profileRoot,independent.id,'auth.json');const privateBytes=await readFile(privatePath);const independentAuth=JSON.parse(privateBytes);
-const home=await mkdtemp(join(tmpdir(),'real-identity-routing-'));const servers=[];const records=[];
+const home=await mkdtemp(join(tmpdir(),'real-identity-routing-'));const servers=[];const records=[];const forwardedRequests=new Set();
 let client;const report={passed:false,realUpstreamRequests:true,isolatedChats:true,refreshTokensCopied:false,checks:[]};
 const save=()=>writeFile(resolve(reportPath),JSON.stringify(report,null,2));
 function shortAuth(auth){return {...auth,tokens:{...auth.tokens,refresh_token:''}};}
@@ -46,9 +46,12 @@ try{
         const bytes=Buffer.concat(chunks);let model;try{model=JSON.parse(bytes).model;}catch{}
         const record={role,model,isModelRequest:req.url.includes('/responses'),credentialMatched:req.headers.authorization===expected,accountHeaderMatched:!auth||req.headers['chatgpt-account-id']===profile.accountId};records.push(record);
         const target=new URL(upstream.href.replace(/\/$/,'')+req.url);
-        const forwarded=httpsRequest(target,{method:req.method,headers:{...req.headers,host:target.host}},response=>{
+        const forwarded=httpsRequest(target,{agent:false,method:req.method,headers:{...req.headers,host:target.host}},response=>{
           record.status=response.statusCode;res.writeHead(response.statusCode,response.headers);response.pipe(res);
         });
+        forwardedRequests.add(forwarded);forwarded.once('close',()=>forwardedRequests.delete(forwarded));
+        res.once('close',()=>forwarded.destroy());
+        forwarded.setTimeout(45000,()=>forwarded.destroy());
         forwarded.on('error',()=>{record.transportFailed=true;if(!res.headersSent)res.writeHead(502);res.end();});forwarded.end(bytes);
       }catch{res.writeHead(502);res.end();}
     });
@@ -98,4 +101,4 @@ try{
   report.independentAuthUnchanged=hash(await readFile(privatePath))===hash(privateBytes);
   assert.ok(report.hostAuthUnchanged&&report.independentAuthUnchanged);report.passed=true;await save();
 }catch(error){report.error=error.message;report.diagnostics=client?.events.filter(x=>/error|warning|turn\/completed/.test(x.method||'')).map(x=>({method:x.method,error:x.params?.error?.message,turnStatus:x.params?.turn?.status}));report.networkRequests=records;await save();console.error(JSON.stringify({passed:false,error:error.message,diagnostics:report.diagnostics,networkRequests:records}));process.exitCode=1;}
-finally{await client?.close();for(const server of servers){server.closeAllConnections();await new Promise(resolve=>server.close(resolve));}await rm(home,{recursive:true,force:true});}
+finally{await client?.close();for(const request of forwardedRequests)request.destroy();for(const server of servers){server.closeAllConnections();await new Promise(resolve=>server.close(resolve));}await rm(home,{recursive:true,force:true});}
