@@ -145,6 +145,8 @@ These are proposed optimizations, not changes included in this assessment. No pr
 
 ## Reproduce
 
+v0.1.4 official quota reads are isolated from `/api/state`, identity-switch coordination and the native backend. They issue read-only HTTPS requests with a 12-second deadline, at most two concurrent requests, a 5-minute success cache and 1-minute error backoff. The browser checks cached values every 30 seconds while visible; initial loading polls once a second, and a manual refresh can fetch early after 30 seconds. Quota reads do not start another CLI or request inference. Each quota endpoint call still reads the local catalog, so its cost is additive to panel polling; no claim of zero total UI/service overhead is made.
+
 ```powershell
 node test/performance-smoke.mjs <installation> <report.json>
 node test/performance-panel.mjs <installation> <panel-report.json>

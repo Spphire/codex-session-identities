@@ -7,13 +7,15 @@ import { fileURLToPath } from 'node:url';
 import { readCatalog } from './catalog.mjs';
 import {removeIdentity} from './identity-management.mjs';
 import {OfficialLogin} from './official-login.mjs';
+import {OfficialUsage} from './official-usage.mjs';
 import { BridgeClient } from './bridge-client.mjs';
 import { SwitchCoordinator } from './switch-coordinator.mjs';
 import { existsSync } from 'node:fs';
 
 const root = dirname(fileURLToPath(import.meta.url));
-export function panelServer({ codexDirectory, switcherDirectory, originalCodexExe, accessToken=randomBytes(32).toString('hex') }) {
+export function panelServer({ codexDirectory, switcherDirectory, originalCodexExe, officialUsageOptions, accessToken=randomBytes(32).toString('hex') }) {
   const login=new OfficialLogin(codexDirectory,originalCodexExe);
+  const usage=new OfficialUsage(codexDirectory,officialUsageOptions);
   const bridge = new BridgeClient(codexDirectory);
   let coordinator=existsSync(join(codexDirectory,'session-identities','panel-bindings.sqlite'))?new SwitchCoordinator(codexDirectory,bridge):null;
   const observed=new Map();
@@ -73,6 +75,9 @@ export function panelServer({ codexDirectory, switcherDirectory, originalCodexEx
         json(503, { error: '运行时桥接未接入，未更改任何会话身份。' });
         return;
       }
+      if(['/api/official-usage','/api/official-usage?refresh=1'].includes(req.url)){
+        json(200,{identities:usage.snapshot(readCatalog(codexDirectory,switcherDirectory).identities,{refresh:req.url.endsWith('?refresh=1')})});return;
+      }
       if (req.url === '/api/state') {
         const state = readCatalog(codexDirectory, switcherDirectory);
         state.runtime = await bridge.connect();
@@ -101,7 +106,7 @@ export function panelServer({ codexDirectory, switcherDirectory, originalCodexEx
       json(500, { error: error instanceof SyntaxError?'请求格式无效':String(error.message || '身份操作失败') });
     }
   });
-  server.on('close',()=>{coordinator?.close();bridge.close();void login.cancel().catch(()=>{});});
+  server.on('close',()=>{usage.close();coordinator?.close();bridge.close();void login.cancel().catch(()=>{});});
   Object.defineProperty(server,'identityAccessToken',{value:accessToken});
   return server;
 }

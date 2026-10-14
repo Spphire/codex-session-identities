@@ -10,11 +10,55 @@ let submitting = false;
 let deleting=false;
 let identityPollTimer=null;
 const rowCache=new Map();
+let officialUsage={};let usageRefreshing=false;let usageNextAt=0;let usageTimer=null;
 const dateFormatter=new Intl.DateTimeFormat('zh-CN',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'});
 const identityName=id=>state?.identities.find(x=>x.runtimeIds?.includes(id)||x.runtimeId===id)?.name || id || '未固定身份';
 const rowIdentity=row=>row.identityState==='verified'?identityName(row.identityId):row.identityId?identityName(row.identityId)+'（待核验）':'未固定身份';
 const date = seconds => dateFormatter.format(new Date(seconds * 1000));
 function element(tag, text, className) { const e=document.createElement(tag); e.textContent=text; if(className)e.className=className; return e; }
+function quotaDuration(minutes){
+  if(minutes===10080)return '每周额度';
+  if(!minutes)return '周期额度';
+  return `${minutes>=1440?`${Number((minutes/1440).toFixed(1))} 天`:minutes>=60?`${Number((minutes/60).toFixed(1))} 小时`:`${minutes} 分钟`}额度`;
+}
+function renderUsage(){
+  for(const li of $('identities').children){
+    const container=li.querySelector('.official-usage');if(!container)continue;
+    container.replaceChildren();const identity=state.identities.find(x=>x.id===li.dataset.identityId);
+    const value=!identity?.available?{status:'unavailable',message:'登录不匹配或已失效'}:officialUsage[li.dataset.identityId];
+    if(!value){container.append(element('small','正在查询额度…'));continue;}
+    for(const limit of value.limits||[]){
+      if(limit.id!=='codex')container.append(element('small',limit.name,'quota-name'));
+      for(const window of [limit.primary,limit.secondary].filter(Boolean)){
+        const elapsed=window.resetsAt&&window.resetsAt*1000<=Date.now();
+        const label=element('div','','quota-label');label.append(element('span',quotaDuration(window.windowDurationMins)),element('span',elapsed?'待更新':`${Number(window.remainingPercent.toFixed(1))}% 剩余`));container.append(label);
+        const meter=document.createElement('meter');meter.min=0;meter.max=100;meter.low=10;meter.high=30;meter.optimum=100;meter.value=window.remainingPercent;meter.setAttribute('aria-label',`${limit.name} ${quotaDuration(window.windowDurationMins)}剩余`);container.append(meter);
+        if(window.resetsAt)container.append(element('small',`重置 ${date(window.resetsAt)}`));
+      }
+    }
+    if(value.credits){
+      const credits=value.credits;
+      container.append(element('div',`Credits 余额：${credits.unlimited?'不限额':credits.balance!==null?credits.balance:credits.hasCredits?'有余额（数值未返回）':'未返回'}`,'credits-balance'));
+    }
+    if(value.message)container.append(element('small',value.message,'quota-error'));
+    else if(value.status==='loading')container.append(element('small','正在查询额度…'));
+    if(value.updatedAt){const time=element('small',`${value.stale?'上次数据 · ':''}${value.loading?'更新中 · ':''}${new Date(value.updatedAt).toLocaleTimeString('zh-CN')} 更新`,'quota-time');time.title=new Date(value.updatedAt).toLocaleString('zh-CN');container.append(time);}
+  }
+}
+async function refreshUsage(manual=false){
+  if(usageRefreshing||document.hidden||!state||!manual&&Date.now()<usageNextAt)return;
+  usageRefreshing=true;$('refresh-usage').disabled=true;clearTimeout(usageTimer);
+  try{
+    const response=await apiFetch(manual?'/api/official-usage?refresh=1':'/api/official-usage');const value=await response.json();if(!response.ok)throw new Error('额度服务暂不可用');
+    officialUsage=value.identities;renderUsage();
+    const loading=Object.values(officialUsage).some(x=>x.loading);
+    usageNextAt=Date.now()+(loading?1000:30000);
+    if(loading)usageTimer=setTimeout(()=>void refreshUsage(),1100);
+  }catch{
+    for(const identity of state.identities)if(identity.kind==='chatgpt')officialUsage[identity.id]={...officialUsage[identity.id],status:'error',message:'额度服务暂不可用',stale:true};
+    renderUsage();usageNextAt=Date.now()+30000;
+  }finally{usageRefreshing=false;$('refresh-usage').disabled=false;}
+}
 function renderDetail() {
   const row = state?.sessions.find(x => x.id === selected);
   $('detail').hidden = !row; $('no-selection').hidden = Boolean(row);
@@ -75,8 +119,10 @@ async function refresh(){
       if(identity.removed)continue;
       const option=new Option(identity.name+(!identity.runtimeId?'（待导入）':!identity.available?'（登录不匹配或已失效）':''),identity.runtimeId||'');option.disabled=!identity.available;$('identity').add(option);
       const li=element('li','');const text=element('div','');text.append(element('span',identity.name));
+      li.dataset.identityId=identity.id;
       const sources=(identity.sources||[]).map(x=>x==='system'?'本体登录':'独立登录').join(' / ');
       text.append(element('small',identity.kind==='chatgpt'?`${sources||'ChatGPT 官方账号'}${identity.runtimeIds?.length>1?` · ${identity.runtimeIds.length} 份档案`:''}${identity.runtimeId&&!identity.available?' · 登录不匹配或已失效':''}`:`API · ${identity.provider}`));
+      if(identity.kind==='chatgpt')text.append(element('div','','official-usage'));
       const used=state.sessions.some(x=>identity.runtimeIds.includes(x.identityId)||x.queue?.pending&&identity.runtimeIds.includes(x.queue.desiredIdentityId));
       const remove=element('button','\u2212','remove-identity');remove.type='button';remove.setAttribute('aria-label',`移除 ${identity.name}`);
       remove.title=used?'仍有会话使用，请先切换这些会话':'从面板移除（保留登录凭据）';remove.disabled=used;
@@ -86,6 +132,9 @@ async function refresh(){
     if(previous)$('identity').value=previous.runtimeId;
     else $('identity').value=state.identities.find(x=>!x.removed&&x.available)?.runtimeId||'';
     $('updated').textContent=`更新于 ${new Date(state.observedAt).toLocaleTimeString('zh-CN')}`;
+    // Discard quota data immediately if a system login no longer matches its profile.
+    for(const identity of state.identities)if(identity.kind==='chatgpt'&&!identity.available)officialUsage[identity.id]={status:'unavailable',message:'登录不匹配或已失效'};
+    renderUsage();void refreshUsage();
     renderRows();renderDetail();await loadIdentity();await loginStatus();
   }catch(error){$('error').textContent=error.message; $('error').hidden=false; $('connection').textContent='连接失败';}
   finally{refreshing=false;$('refresh').disabled=false;}
@@ -139,7 +188,8 @@ async function mutate(cancel=false){
   finally{submitting=false;renderDetail();}
 }
 $('identity').addEventListener('change',renderDetail);$('switch').addEventListener('click',()=>mutate());$('cancel-switch').addEventListener('click',()=>mutate(true));
+$('refresh-usage').addEventListener('click',()=>refreshUsage(true));
 $('search').addEventListener('input',renderRows); $('provider').addEventListener('change',renderRows); $('archived').addEventListener('change',renderRows); $('refresh').addEventListener('click',refresh);
 setInterval(()=>{if(!document.hidden)void refresh();},5000);refresh();
-document.addEventListener('visibilitychange',()=>{clearTimeout(identityPollTimer);if(!document.hidden)void refresh();});
+document.addEventListener('visibilitychange',()=>{clearTimeout(identityPollTimer);clearTimeout(usageTimer);if(!document.hidden){usageNextAt=0;void refresh();}});
 addEventListener('hashchange',()=>{acceptAccess();void refresh();});

@@ -19,11 +19,11 @@ for(const [name,kind] of [['official','chatgpt'],['system','chatgpt-system'],['g
   writeFileSync(join(directory,'profile.json'),JSON.stringify({kind,accountId:'SYNTHETIC_ACCOUNT',userId:'SYNTHETIC_USER',providerId:'test_gateway'}));
   writeFileSync(join(directory,'label.json'),JSON.stringify({name:'Synthetic gateway'}));
   if(kind==='api')continue;
-  writeFileSync(join(kind==='chatgpt-system'?home:directory,'auth.json'),JSON.stringify({auth_mode:'chatgpt',tokens:{account_id:'SYNTHETIC_ACCOUNT',id_token:'header.'+Buffer.from(JSON.stringify({email:'synthetic@example.com','https://api.openai.com/auth':{chatgpt_user_id:'SYNTHETIC_USER'}})).toString('base64url')+'.synthetic'}}));
+  writeFileSync(join(kind==='chatgpt-system'?home:directory,'auth.json'),JSON.stringify({auth_mode:'chatgpt',tokens:{account_id:'SYNTHETIC_ACCOUNT',access_token:'SYNTHETIC_ACCESS',id_token:'header.'+Buffer.from(JSON.stringify({email:'synthetic@example.com','https://api.openai.com/auth':{chatgpt_user_id:'SYNTHETIC_USER'}})).toString('base64url')+'.synthetic'}}));
 }
 mkdirSync(join(home,'session-identities','bindings'));
 writeFileSync(join(home,'session-identities','bindings',id+'.json'),JSON.stringify({identityId:'official',revision:1}));
-const server=panelServer({codexDirectory:home,switcherDirectory:join(home,'identity-switcher')});
+const server=panelServer({codexDirectory:home,switcherDirectory:join(home,'identity-switcher'),officialUsageOptions:{fetchUsage:async()=>({account_id:'SYNTHETIC_ACCOUNT',user_id:'SYNTHETIC_USER',rate_limit:{primary_window:{used_percent:22,limit_window_seconds:18000,reset_at:2000000000},secondary_window:{used_percent:41,limit_window_seconds:604800,reset_at:2000600000}},credits:{has_credits:true,unlimited:false,balance:'12.5'}})}});
 server.listen(0,'127.0.0.1');await once(server,'listening');
 let browser;
 try{
@@ -31,16 +31,21 @@ try{
   const page=await browser.newPage();const errors=[];page.on('pageerror',error=>errors.push(error.message));
   await page.goto(`http://127.0.0.1:${server.address().port}/#access=${server.identityAccessToken}`);
   await page.waitForFunction(()=>document.querySelectorAll('#identities li').length===2);
+  await page.waitForFunction(()=>document.querySelector('.credits-balance')?.textContent==='Credits 余额：12.5');
+  assert.match(await page.locator('.official-usage').innerText(),/78% 剩余/);
+  assert.match(await page.locator('.official-usage').innerText(),/59% 剩余/);
+  assert.equal(await page.locator('meter').count(),2);
+  assert.equal(await page.locator('.official-usage').count(),1,'API rows must not show official account quotas');
   assert.equal(await page.locator('#identity option').count(),2);
   assert.equal(await page.getByRole('button',{name:'移除 synthetic@example.com',exact:true}).isDisabled(),true);
   assert.match(await page.locator('#rows').innerText(),/synthetic@example.com/);
   await page.evaluate(()=>{globalThis.fixtureRow=document.querySelector('#rows tr');});
-  await page.getByRole('button',{name:'刷新'}).click();
+  await page.getByRole('button',{name:'刷新',exact:true}).click();
   await page.waitForFunction(()=>!document.querySelector('#refresh').disabled);
   assert.equal(await page.evaluate(()=>fixtureRow===document.querySelector('#rows tr')),true,'Refresh must retain unchanged rows');
   const update=new DatabaseSync(join(home,'state_5.sqlite'));
   update.prepare('UPDATE threads SET title=? WHERE id=?').run('Updated synthetic chat',id);update.close();
-  await page.getByRole('button',{name:'刷新'}).click();await page.waitForFunction(()=>document.querySelector('.session-title').textContent==='Updated synthetic chat');
+  await page.getByRole('button',{name:'刷新',exact:true}).click();await page.waitForFunction(()=>document.querySelector('.session-title').textContent==='Updated synthetic chat');
   assert.equal(await page.evaluate(()=>fixtureRow===document.querySelector('#rows tr')),true,'Updated rows must retain their selection target');
   await page.locator('#search').fill('no-fixture-match');assert.equal(await page.locator('#rows tr').count(),0);
   await page.locator('#search').fill('');assert.equal(await page.locator('#rows tr').count(),1);
@@ -56,7 +61,7 @@ try{
   await page.waitForFunction(()=>document.querySelectorAll('#identities li').length===1);
   await page.reload();await page.waitForFunction(()=>document.querySelectorAll('#identities li').length===1);
   assert.deepEqual(errors,[]);
-  console.log(JSON.stringify({passed:true,deduplicated:true,usedRemovalDisabled:true,unusedRemovalPersists:true,desktopMobile:true}));
+  console.log(JSON.stringify({passed:true,officialUsage:true,deduplicated:true,usedRemovalDisabled:true,unusedRemovalPersists:true,desktopMobile:true}));
 }finally{
   await browser?.close();await new Promise(resolve=>server.close(resolve));rmSync(home,{recursive:true,force:true});
 }

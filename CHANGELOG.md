@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.4 - 2026-10-14
+
+- Display each official account's remaining periodic allowances, reset times and Credits balance in the registered-identity sidebar; do not infer a monetary currency.
+- Query verified credentials independently through the native usage endpoint, without modifying host login or issuing inference. Bound request time/concurrency and cache results; fence token/account changes and preserve marked old data on network failures.
+- Add quota-only refresh, authenticated endpoint coverage, account isolation/cache/error tests and synthetic desktop/mobile browser checks. The patched Rust backend and client version alignment are unchanged.
+
 ## 0.1.2 - 2026-10-14
 
 - Add official-account device authorization in the identity sidebar, using an isolated original-CLI login process and automatic email registration.

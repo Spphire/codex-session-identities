@@ -40,6 +40,8 @@ Optional fourth/fifth arguments select an exact backend executable and model, e.
 
 ## Package
 
+Read-only real official-usage QA: `node test/real-official-usage-smoke.mjs <installation>`. This performs no model inference, verifies that registered official accounts each return quota data, and checks that original auth-file hashes are unchanged. Its output contains real quota/credit values; keep it private. The optional browser QA also checks quota bars and Credits labels with synthetic values.
+
 ```powershell
 .\build-release.ps1 -PatchedAppServer .\upstream\codex-rs\target\release\codex-app-server.exe -OutputDirectory .\dist\windows
 Compress-Archive -Path .\dist\windows\* -DestinationPath .\dist\CodexSessionIdentity-Windows.zip
