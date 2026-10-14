@@ -34,6 +34,8 @@ node test/runtime-smoke.mjs upstream/codex-rs/target/release/codex-app-server.ex
 
 Optional panel UI QA: install Playwright locally (not a runtime dependency), ensure Microsoft Edge is present, then run `node test/panel-ui-smoke.mjs <screenshot-directory>`. It uses only synthetic identities and checks duplicate grouping, guarded removal and desktop/mobile layouts. `PLAYWRIGHT_MODULE` can instead point to an existing Playwright entrypoint.
 
+Real routing QA is separate and billable: `node test/real-identity-routing-smoke.mjs <installation> <API-profile-id> <private-report>`. It requires a system official profile, an independent profile for that same verified account, and a registered API profile. It creates isolated chats and short-lived credential copies without refresh tokens; a transparent loopback relay forwards requests to the original HTTPS endpoints and records only credential/account-match booleans and HTTP status. It selects an available Luna model, low reasoning and standard tier. Keep reports private and run only with the account owner's consent.
+
 ## Package
 
 ```powershell

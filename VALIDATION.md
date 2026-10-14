@@ -6,6 +6,7 @@ The following checks were performed during development. Raw real-account reports
 
 - 33 Node unit/integration tests passed, covering authenticated bridge routing, data minimization, origin/host checks, identity isolation, queued and cancelled switches, offline bindings, model catalog, desktop-runtime discovery, duplicate grouping and guarded removal.
 - Synthetic Edge browser QA passed on desktop/mobile: grouping and alias labels, bound-removal disabled, unused-removal confirmation/persistence, no JavaScript errors and no identity-text/button overlap.
+- Real routing QA used one isolated chat across system official -> API -> independent official -> system official with `gpt-6-luna`, low reasoning and standard tier. All four requests reached their real upstream service via a transparent local relay, matched the expected bearer credential (and official account header), returned HTTP 200 and replied OK. A sibling chat and both original official credential files remained unchanged. The two official aliases in this local check belong to the same account; this does not prove a fresh two-distinct-official-account switch.
 - Rust validation previously passed 44 thread-manager tests and one official account/user fencing test.
 - Synthetic DPAPI checks covered import, refresh synchronization and refusal of concurrent vault changes.
 - Native routing smoke tests covered legacy/paginated histories, busy refusal, sibling progress, instruction retention, fork inheritance, cold resume and unavailable-identity replacement.
