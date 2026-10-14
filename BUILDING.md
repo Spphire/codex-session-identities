@@ -36,6 +36,8 @@ Optional panel UI QA: install Playwright locally (not a runtime dependency), ens
 
 Real routing QA is separate and billable: `node test/real-identity-routing-smoke.mjs <installation> <API-profile-id> <private-report>`. It requires a system official profile, an independent profile for that same verified account, and a registered API profile. It creates isolated chats and short-lived credential copies without refresh tokens; a transparent loopback relay forwards requests to the original HTTPS endpoints and records only credential/account-match booleans and HTTP status. It selects an available Luna model, low reasoning and standard tier. Keep reports private and run only with the account owner's consent.
 
+Optional fourth/fifth arguments select an exact backend executable and model, e.g. `<backend.exe> gpt-5.6-luna`. This bypasses the bridge to verify the identity implementation in a particular compiled backend, and records its SHA-256. Without those arguments the test uses the configured installed bridge/backend.
+
 ## Package
 
 ```powershell
