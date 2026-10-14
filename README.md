@@ -24,6 +24,8 @@ See [USER-GUIDE.md](USER-GUIDE.md) for installation, identity registration, swit
 
 See [BUILDING.md](BUILDING.md). The repository contains the sidecar and a patch series, not a forked copy of the entire upstream tree.
 
+See [PERFORMANCE.md](PERFORMANCE.md) for measured startup, switching, RPC, shell-execution and panel costs on local and remote Windows hosts, including the unoptimized-backend limitation and reproduction commands.
+
 ```powershell
 npm test
 powershell -NoProfile -ExecutionPolicy Bypass -File test/vault-test.ps1
@@ -37,7 +39,7 @@ The tested baseline is Windows Desktop `26.1007.2314.0`, installed CLI `0.162.0-
 
 Fast availability in the Desktop UI is still gated by the host account. Use an official host login for that UI capability; per-chat identities do not migrate third-party connector authorizations. Model availability and quota remain subject to each provider and account. Switching can reset temporary tool memory, but preserves files and conversation history.
 
-The bridge supplies the installed CLI version for official model requests and catalog lookup. This does not grant additional account access or model entitlement.
+The adapter aligns Desktop initialization, official model requests/catalog queries and remote-control registration with the actual installed CLI version, including a guarded refresh of cached remote registrations. Execution companions come from that same installation. See [VERSION-COMPATIBILITY.md](VERSION-COMPATIBILITY.md) for the policy, fallback behavior and update checklist. Version alignment does not grant account access or prove compatibility with a newer Desktop.
 
 ## Security And License
 

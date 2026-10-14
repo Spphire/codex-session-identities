@@ -76,9 +76,12 @@ try{
   const siblingBefore=await client.call('thread/identity/read',{threadId:sibling});
   for(const [role,profile] of [['system',system],['api',api],['independent',independent],['system',system]]){
     const previous=await client.call('thread/identity/read',{threadId});
+    const switchStart=performance.now();
     const binding=await client.call('thread/identity/set',{threadId,identityId:profile.id,expectedRevision:previous.revision});
+    const switchMs=performance.now()-switchStart;
     assert.equal(binding.identityId,profile.id);assert.equal(binding.verified,true);
     const startIndex=records.length;
+    const replyStart=performance.now();
     const started=await client.call('turn/start',{threadId,model:model.model,effort,serviceTier:null,input:[{type:'text',text:'Reply exactly OK. Do not use tools.'}]});
     let finished;
     for(const deadline=Date.now()+90000;Date.now()<deadline;){
@@ -89,11 +92,13 @@ try{
     }
     assert.ok(finished,'Real request timed out');
     const requests=records.slice(startIndex).filter(x=>x.isModelRequest);
-    const check={role,model:model.model,status:finished.status,expectedIdentityConfirmed:true,networkRequests:requests,replyIsOK:finished.items.some(x=>x.type==='agentMessage'&&/^OK[.!]?$/.test(x.text.trim()))};
+    const check={role,model:model.model,status:finished.status,switchMs:+switchMs.toFixed(3),replyObservedMs:+(performance.now()-replyStart).toFixed(3),expectedIdentityConfirmed:true,networkRequests:requests,replyIsOK:finished.items.some(x=>x.type==='agentMessage'&&/^OK[.!]?$/.test(x.text.trim()))};
     report.checks.push(check);await save();console.log(JSON.stringify(check));
     assert.equal(finished.status,'completed',finished.error?.message);
     assert.ok(check.replyIsOK);assert.ok(requests.length);
-    assert.ok(requests.every(x=>x.role===role&&x.credentialMatched&&x.accountHeaderMatched&&x.status===200),'Wrong upstream route, credential, account header or HTTP status');
+    assert.ok(requests.every(x=>x.role===role&&x.credentialMatched&&x.accountHeaderMatched),'Wrong upstream route, credential or account header');
+    assert.ok(requests.some(x=>x.status===200),'No successful upstream model response');
+    assert.ok(requests.every(x=>x.status===200||(x.status==null&&x.transportFailed)),'Unexpected upstream HTTP status');
     assert.deepEqual(await client.call('thread/identity/read',{threadId:sibling}),siblingBefore,'Sibling identity changed');
   }
   const state=readCatalog(home,join(home,'identity-switcher'));

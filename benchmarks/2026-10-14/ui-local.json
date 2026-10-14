@@ -1,0 +1,35 @@
+{
+  "date": "2026-10-14T10:48:47.390Z",
+  "synthetic": true,
+  "cases": [
+    {
+      "sessions": 100,
+      "n": 10,
+      "renderAndLayoutMedianMs": 6.8,
+      "renderAndLayoutP95Ms": 7.1,
+      "domElements": 774
+    },
+    {
+      "sessions": 800,
+      "n": 10,
+      "renderAndLayoutMedianMs": 48.4,
+      "renderAndLayoutP95Ms": 61,
+      "domElements": 5674
+    },
+    {
+      "sessions": 1200,
+      "n": 10,
+      "renderAndLayoutMedianMs": 73.8,
+      "renderAndLayoutP95Ms": 78.5,
+      "domElements": 8474
+    },
+    {
+      "sessions": 5000,
+      "n": 10,
+      "renderAndLayoutMedianMs": 318,
+      "renderAndLayoutP95Ms": 381.1,
+      "domElements": 35074
+    }
+  ],
+  "passed": true
+}

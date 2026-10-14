@@ -48,3 +48,7 @@ Compress-Archive -Path .\dist\windows\* -DestinationPath .\dist\CodexSessionIden
 The packager includes Node.js, launcher binaries, scripts, the web UI, patches and licenses. It records payload SHA-256 hashes. At installation and launch, the original installed CLI supplies the compatible code-mode host, command runner and Windows sandbox setup executables.
 
 For updates, `prepare-update.ps1` prepares a candidate checkout and tests; it does not prove Desktop compatibility. Verify both official-account switching and official/API switching, model catalog, Fast, tool execution, restart and panel authentication before deployment.
+
+Follow the full [version-alignment checklist](VERSION-COMPATIBILITY.md#update-checklist), including native paginated forks, remote registration and a real phone reconnection. Never treat reporting the installed version as proof that an older source checkout implements newer features.
+
+Performance checks and reproduction commands are in [PERFORMANCE.md](PERFORMANCE.md). Record build optimization flags alongside timing results. The currently measured v0.1.2 binary was a dev build; the recommended build command above uses release. Comparing that dev binary to the optimized original CLI does not isolate the identity patch's cost.

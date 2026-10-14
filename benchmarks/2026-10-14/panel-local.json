@@ -1,0 +1,19 @@
+{
+  "date": "2026-10-14T10:41:37.224Z",
+  "passed": true,
+  "readOnly": true,
+  "sessions": 1218,
+  "identities": 4,
+  "connected": true,
+  "stateBytes": 711115,
+  "firstMs": 47.567,
+  "n": 30,
+  "medianMs": 53.889,
+  "p95Ms": 73.975,
+  "cpuMsPerRequest": 42.188,
+  "estimatedOneTabPollingCorePercent": 0.844,
+  "idleWallMs": 10233,
+  "idleCpuSeconds": 0.0625,
+  "privateMiB": 109.7,
+  "workingSetMiB": 99.14
+}
