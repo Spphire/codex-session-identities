@@ -1,4 +1,2 @@
-* text eol=lf
-*.patch -text
-*.exe binary
-*.zip binary
+# Unified patch context lines legitimately end with a single space.
+*.patch whitespace=-blank-at-eol
