@@ -1,0 +1,1310 @@
+diff --git a/codex-rs/app-server-protocol/src/protocol/common.rs b/codex-rs/app-server-protocol/src/protocol/common.rs
+index b710f18..a3faf82 100644
+--- a/codex-rs/app-server-protocol/src/protocol/common.rs
++++ b/codex-rs/app-server-protocol/src/protocol/common.rs
+@@ -764,6 +764,16 @@ client_request_definitions! {
+         serialization: thread_id(params.thread_id),
+         response: v2::ThreadBackgroundTerminalsTerminateResponse,
+     },
++    ThreadIdentityRead => "thread/identity/read" {
++        params: v2::ThreadIdentityReadParams,
++        serialization: thread_id(params.thread_id),
++        response: v2::ThreadIdentityResponse,
++    },
++    ThreadIdentitySet => "thread/identity/set" {
++        params: v2::ThreadIdentitySetParams,
++        serialization: thread_id(params.thread_id),
++        response: v2::ThreadIdentitySetResponse,
++    },
+     ThreadRevert => "thread/revert" {
+         params: v2::ThreadRevertParams,
+         serialization: thread_id(params.thread_id),
+diff --git a/codex-rs/app-server-protocol/src/protocol/v2/thread.rs b/codex-rs/app-server-protocol/src/protocol/v2/thread.rs
+index 1746ceb..60731cd 100644
+--- a/codex-rs/app-server-protocol/src/protocol/v2/thread.rs
++++ b/codex-rs/app-server-protocol/src/protocol/v2/thread.rs
+@@ -698,6 +698,39 @@ fn instruction_source_path_uris(sources: &[LegacyAppPathString]) -> Vec<PathUri>
+         .collect()
+ }
+ 
++#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
++#[serde(rename_all = "camelCase")]
++#[ts(export_to = "v2/")]
++pub struct ThreadIdentityReadParams {
++    pub thread_id: String,
++}
++
++#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
++#[serde(rename_all = "camelCase")]
++#[ts(export_to = "v2/")]
++pub struct ThreadIdentitySetParams {
++    pub thread_id: String,
++    pub identity_id: String,
++    pub expected_revision: u32,
++}
++
++#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
++#[serde(rename_all = "camelCase")]
++#[ts(export_to = "v2/")]
++pub struct ThreadIdentityResponse {
++    pub thread_id: String,
++    pub identity_id: Option<String>,
++    pub revision: u32,
++    pub verified: bool,
++    /// applied, busy, unloaded, or unbound.
++    pub status: String,
++}
++
++#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
++#[serde(transparent)]
++#[ts(export_to = "v2/")]
++pub struct ThreadIdentitySetResponse(pub ThreadIdentityResponse);
++
+ #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
+ #[serde(rename_all = "camelCase")]
+ #[ts(export_to = "v2/")]
+diff --git a/codex-rs/app-server/src/message_processor.rs b/codex-rs/app-server/src/message_processor.rs
+index c9858cd..45cbcf2 100644
+--- a/codex-rs/app-server/src/message_processor.rs
++++ b/codex-rs/app-server/src/message_processor.rs
+@@ -991,6 +991,7 @@ impl MessageProcessor {
+             | ClientRequest::ThreadFork { .. }
+             | ClientRequest::ThreadResume { .. }
+             | ClientRequest::ThreadRevert { .. }
++            | ClientRequest::ThreadIdentitySet { .. }
+             | ClientRequest::ThreadSettingsUpdate { .. }
+             | ClientRequest::TurnSettingsUpdate { .. }
+             | ClientRequest::ThreadDelete { .. }
+@@ -1470,6 +1471,23 @@ impl MessageProcessor {
+                     .thread_background_terminals_terminate(params)
+                     .await
+             }
++            ClientRequest::ThreadIdentityRead { params, .. } => self
++                .thread_processor
++                .thread_identity_read(params)
++                .await
++                .map(|response| Some(response.into())),
++            ClientRequest::ThreadIdentitySet { params, .. } => self
++                .thread_processor
++                .thread_identity_set(
++                    request_id.clone(),
++                    params,
++                    app_server_client_name.clone(),
++                    client_version.clone(),
++                )
++                .await
++                .map(|response| {
++                    Some(codex_app_server_protocol::ThreadIdentitySetResponse(response).into())
++                }),
+             ClientRequest::ThreadRevert { params, .. } => {
+                 self.thread_processor
+                     .thread_revert(
+diff --git a/codex-rs/app-server/src/request_processors/thread_identity.rs b/codex-rs/app-server/src/request_processors/thread_identity.rs
+new file mode 100644
+index 0000000..b19b035
+--- /dev/null
++++ b/codex-rs/app-server/src/request_processors/thread_identity.rs
+@@ -0,0 +1,525 @@
++use super::*;
++use codex_app_server_protocol::ThreadIdentityReadParams;
++use codex_app_server_protocol::ThreadIdentityResponse;
++use codex_app_server_protocol::ThreadIdentitySetParams;
++use codex_login::AuthManagerConfig;
++use serde::Deserialize;
++use serde::Serialize;
++use tokio::io::AsyncWriteExt;
++
++#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
++#[serde(rename_all = "camelCase", deny_unknown_fields)]
++pub(super) struct IdentityBinding {
++    pub identity_id: String,
++    pub revision: u32,
++}
++
++#[derive(Deserialize)]
++#[serde(rename_all = "camelCase", deny_unknown_fields)]
++struct IdentityProfile {
++    kind: String,
++    provider_id: String,
++    model: Option<String>,
++    account_id: Option<String>,
++    user_id: Option<String>,
++    provider: Option<serde_json::Value>,
++}
++
++fn validate_identity_id(value: &str) -> Result<(), JSONRPCErrorError> {
++    if value.is_empty()
++        || value.len() > 100
++        || !value
++            .bytes()
++            .all(|c| c.is_ascii_alphanumeric() || c == b'_' || c == b'-')
++    {
++        return Err(invalid_params("invalid identity reference"));
++    }
++    Ok(())
++}
++
++impl ThreadRequestProcessor {
++    pub(super) async fn pinned_identity_provider(
++        &self,
++        identity_id: &str,
++    ) -> Result<(String, Option<serde_json::Value>), JSONRPCErrorError> {
++        validate_identity_id(identity_id)?;
++        let path = self
++            .identity_directory()
++            .join("profiles")
++            .join(identity_id)
++            .join("profile.json");
++        let bytes = tokio::fs::read(path)
++            .await
++            .map_err(|_| invalid_request("identity profile is unavailable"))?;
++        let profile: IdentityProfile = serde_json::from_slice(&bytes)
++            .map_err(|_| invalid_request("identity profile is invalid"))?;
++        Ok((profile.provider_id, profile.provider))
++    }
++    fn identity_directory(&self) -> PathBuf {
++        self.config
++            .codex_home
++            .join("session-identities")
++            .to_path_buf()
++    }
++
++    pub(super) async fn load_identity_binding(
++        &self,
++        id: ThreadId,
++    ) -> Result<Option<IdentityBinding>, JSONRPCErrorError> {
++        let path = self
++            .identity_directory()
++            .join("bindings")
++            .join(format!("{id}.json"));
++        let bytes = match tokio::fs::read(path).await {
++            Ok(bytes) => bytes,
++            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
++            Err(_) => return Err(internal_error("cannot read identity binding")),
++        };
++        let binding: IdentityBinding = serde_json::from_slice(&bytes)
++            .map_err(|_| internal_error("invalid identity binding"))?;
++        validate_identity_id(&binding.identity_id)?;
++        Ok(Some(binding))
++    }
++
++    pub(super) async fn save_identity_binding(
++        &self,
++        id: ThreadId,
++        binding: Option<&IdentityBinding>,
++    ) -> Result<(), JSONRPCErrorError> {
++        let directory = self.identity_directory().join("bindings");
++        tokio::fs::create_dir_all(&directory)
++            .await
++            .map_err(|_| internal_error("cannot create binding directory"))?;
++        let destination = directory.join(format!("{id}.json"));
++        let Some(binding) = binding else {
++            return match tokio::fs::remove_file(destination).await {
++                Ok(()) => Ok(()),
++                Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
++                Err(_) => Err(internal_error("cannot restore unbound identity")),
++            };
++        };
++        let temporary = directory.join(format!("{id}.{}.tmp", uuid::Uuid::new_v4()));
++        let bytes = serde_json::to_vec(binding)
++            .map_err(|_| internal_error("cannot encode identity binding"))?;
++        let result = async {
++            let mut file = tokio::fs::OpenOptions::new()
++                .write(true)
++                .create_new(true)
++                .open(&temporary)
++                .await?;
++            file.write_all(&bytes).await?;
++            file.sync_all().await?;
++            drop(file);
++            tokio::fs::rename(&temporary, destination).await
++        }
++        .await;
++        if result.is_err() {
++            let _ = tokio::fs::remove_file(temporary).await;
++            return Err(internal_error("cannot persist identity binding"));
++        }
++        Ok(())
++    }
++
++    pub(super) async fn prepare_identity_runtime(
++        &self,
++        current: &Config,
++        identity_id: &str,
++    ) -> Result<(Config, Arc<AuthManager>), JSONRPCErrorError> {
++        validate_identity_id(identity_id)?;
++        if codex_login::is_workload_identity_selected()
++            || std::env::var_os(codex_login::CODEX_ACCESS_TOKEN_ENV_VAR).is_some()
++        {
++            return Err(invalid_request(
++                "process-wide external authentication cannot be used with an identity profile",
++            ));
++        }
++        let directory = self.identity_directory().join("profiles").join(identity_id);
++        let bytes = tokio::fs::read(directory.join("profile.json"))
++            .await
++            .map_err(|_| invalid_request("identity profile is unavailable"))?;
++        let profile: IdentityProfile = serde_json::from_slice(&bytes)
++            .map_err(|_| invalid_request("identity profile is invalid"))?;
++        if profile.kind != "chatgpt" && profile.kind != "chatgpt-system" && profile.kind != "api" {
++            return Err(invalid_request("unsupported identity kind"));
++        }
++        let mut retained_flags = toml::Value::Table(Default::default());
++        for layer in current.config_layer_stack.layers_low_to_high() {
++            if matches!(layer.name, codex_config::ConfigLayerSource::SessionFlags) {
++                codex_config::merge_toml_values(&mut retained_flags, &layer.config);
++            }
++        }
++        let mut overrides: HashMap<String, serde_json::Value> = serde_json::from_value(
++            serde_json::to_value(retained_flags)
++                .map_err(|_| internal_error("cannot retain session settings"))?,
++        )
++        .map_err(|_| internal_error("invalid retained session settings"))?;
++        if let Some(provider) = profile.provider.clone() {
++            let providers = overrides
++                .entry("model_providers".to_string())
++                .or_insert_with(|| serde_json::json!({}));
++            providers
++                .as_object_mut()
++                .ok_or_else(|| internal_error("invalid retained providers"))?
++                .insert(profile.provider_id.clone(), provider);
++        }
++        let mut config = self
++            .config_manager
++            .load_for_cwd(
++                Some(overrides),
++                ConfigOverrides {
++                    model_provider: Some(profile.provider_id.clone()),
++                    model: profile.model.or_else(|| current.model.clone()),
++                    cwd: Some(current.cwd.to_path_buf()),
++                    base_instructions: current.base_instructions.clone(),
++                    developer_instructions: current.developer_instructions.clone(),
++                    compact_prompt: current.compact_prompt.clone(),
++                    review_model: current.review_model.clone(),
++                    show_raw_agent_reasoning: Some(current.show_raw_agent_reasoning),
++                    ..Default::default()
++                },
++                Some(current.cwd.to_path_buf()),
++            )
++            .await
++            .map_err(|error| config_load_error(&error))?;
++        if config.model_provider_id != profile.provider_id {
++            return Err(invalid_request(
++                "managed requirements rejected the identity provider",
++            ));
++        }
++        self.config_manager
++            .check_thread_model_provider(&config)
++            .await
++            .map_err(|error| config_load_error(&error))?;
++        let auth_config = codex_login::AuthConfig {
++            codex_home: directory,
++            auth_credentials_store_mode: codex_login::AuthCredentialsStoreMode::File,
++            keyring_backend_kind: config.auth_keyring_backend_kind(),
++            forced_login_method: config.forced_login_method(),
++            forced_chatgpt_workspace_id: config.forced_chatgpt_workspace_id(),
++            managed_auth_policy: config.managed_auth_policy(),
++            chatgpt_base_url: Some(config.chatgpt_base_url.clone()),
++            auth_route_config: config.auth_route_config(),
++        };
++        let mut cache = self.identity_auth_cache.lock().await;
++        let manager = if profile.kind == "chatgpt-system" {
++            Arc::clone(&self.auth_manager)
++        } else {
++            match cache.get(identity_id) {
++                Some((cached_config, manager)) if cached_config == &auth_config => {
++                    Arc::clone(manager)
++                }
++                _ => {
++                    let manager = AuthManager::shared_from_auth_config(auth_config.clone(), false)
++                        .await
++                        .map_err(|_| invalid_request("identity authentication is unavailable"))?;
++                    cache.insert(
++                        identity_id.to_owned(),
++                        (auth_config.clone(), Arc::clone(&manager)),
++                    );
++                    manager
++                }
++            }
++        };
++        drop(cache);
++        let auth = manager.auth().await;
++        if profile.kind == "chatgpt" || profile.kind == "chatgpt-system" {
++            let valid = auth.as_ref().is_some_and(|auth| {
++                auth.is_chatgpt_auth()
++                    && auth_config.allows_auth(auth)
++                    && profile.account_id.is_some()
++                    && auth.get_account_id() == profile.account_id
++                    && profile.user_id.is_some()
++                    && auth.get_chatgpt_user_id() == profile.user_id
++            });
++            if !valid || !config.model_provider.requires_openai_auth {
++                return Err(invalid_request(
++                    "official account does not match its registered identity",
++                ));
++            }
++            config.expected_model_identity = profile.account_id.zip(profile.user_id);
++        } else if auth.as_ref().is_some_and(|auth| !auth.is_api_key_auth()) {
++            return Err(invalid_request("API identity contains non-API credentials"));
++        } else if config.model_provider.requires_openai_auth && auth.is_none() {
++            return Err(invalid_request("API identity credentials are unavailable"));
++        }
++        Ok((config, manager))
++    }
++
++    pub(crate) async fn thread_identity_read(
++        &self,
++        params: ThreadIdentityReadParams,
++    ) -> Result<ThreadIdentityResponse, JSONRPCErrorError> {
++        let id = ThreadId::from_string(&params.thread_id)
++            .map_err(|_| invalid_params("invalid thread ID"))?;
++        let binding = self.load_identity_binding(id).await?;
++        let loaded = self.thread_manager.get_thread(id).await.is_ok();
++        let cached = self.identity_bindings.lock().await.get(&id).cloned();
++        let verified = loaded && binding.is_some() && cached == binding;
++        Ok(ThreadIdentityResponse {
++            thread_id: id.to_string(),
++            identity_id: binding.as_ref().map(|b| b.identity_id.clone()),
++            revision: binding.map_or(0, |b| b.revision),
++            verified,
++            status: if verified {
++                "applied"
++            } else if loaded {
++                "unbound"
++            } else {
++                "unloaded"
++            }
++            .to_string(),
++        })
++    }
++
++    pub(crate) async fn thread_identity_set(
++        &self,
++        request_id: ConnectionRequestId,
++        params: ThreadIdentitySetParams,
++        client_name: Option<String>,
++        client_version: Option<String>,
++    ) -> Result<ThreadIdentityResponse, JSONRPCErrorError> {
++        validate_identity_id(&params.identity_id)?;
++        let _permit = self.acquire_thread_list_state_permit().await?;
++        let requested_id = ThreadId::from_string(&params.thread_id)
++            .map_err(|_| invalid_params("invalid thread ID"))?;
++        if self.thread_manager.get_thread(requested_id).await.is_err() {
++            let previous = self.load_identity_binding(requested_id).await?;
++            if previous.as_ref().map_or(0, |b| b.revision) != params.expected_revision {
++                return Err(invalid_request(
++                    "identity revision changed; refresh before switching",
++                ));
++            }
++            let stored = self
++                .read_stored_thread_for_resume(&params.thread_id, None, false)
++                .await?;
++            if stored.parent_thread_id.is_some()
++                || stored.source.is_non_root_agent()
++                || stored.archived_at.is_some()
++            {
++                return Err(invalid_request(
++                    "identity selection requires an unarchived root thread",
++                ));
++            }
++            let mut current = self.config.as_ref().clone();
++            current.cwd = AbsolutePathBuf::from_absolute_path(&stored.cwd)
++                .map_err(|_| invalid_request("invalid stored working directory"))?;
++            current.model = stored.model;
++            drop(_permit);
++            self.prepare_identity_runtime(&current, &params.identity_id)
++                .await?;
++            let _permit = self.acquire_thread_list_state_permit().await?;
++            if self.thread_manager.get_thread(requested_id).await.is_ok()
++                || self.load_identity_binding(requested_id).await? != previous
++            {
++                return Err(invalid_request(
++                    "thread changed during identity preparation; retry",
++                ));
++            }
++            let binding = IdentityBinding {
++                identity_id: params.identity_id,
++                revision: params
++                    .expected_revision
++                    .checked_add(1)
++                    .ok_or_else(|| invalid_request("identity revision exhausted"))?,
++            };
++            self.save_identity_binding(requested_id, Some(&binding))
++                .await?;
++            return self
++                .thread_identity_read(ThreadIdentityReadParams {
++                    thread_id: params.thread_id,
++                })
++                .await;
++        }
++        let (id, thread) = self.load_thread(&params.thread_id).await?;
++        ensure_direct_input_allowed(thread.as_ref()).await?;
++        let previous = self.load_identity_binding(id).await?;
++        if previous.as_ref().map_or(0, |b| b.revision) != params.expected_revision {
++            return Err(invalid_request(
++                "identity revision changed; refresh before switching",
++            ));
++        }
++        let snapshot = thread.config_snapshot().await;
++        if snapshot.ephemeral || snapshot.session_source.is_non_root_agent() {
++            return Err(invalid_request(
++                "identity switching currently requires a persisted root thread",
++            ));
++        }
++        if matches!(thread.agent_status().await, AgentStatus::Running)
++            || !thread.list_background_terminals().await.is_empty()
++            || matches!(
++                self.thread_watch_manager
++                    .loaded_status_for_thread(&id.to_string())
++                    .await,
++                ThreadStatus::Active { .. }
++            )
++        {
++            let mut state = self
++                .thread_identity_read(ThreadIdentityReadParams {
++                    thread_id: params.thread_id,
++                })
++                .await?;
++            state.status = "busy".to_string();
++            return Ok(state);
++        }
++        for child in self
++            .thread_manager
++            .list_agent_subtree_thread_ids(id)
++            .await
++            .map_err(|_| internal_error("cannot inspect child runtimes"))?
++        {
++            if child != id && self.thread_manager.get_thread(child).await.is_ok() {
++                let mut state = self
++                    .thread_identity_read(ThreadIdentityReadParams {
++                        thread_id: id.to_string(),
++                    })
++                    .await?;
++                state.status = "busy".to_string();
++                return Ok(state);
++            }
++        }
++        let old = ThreadRevertRuntimeSnapshot {
++            config: thread.config().await.as_ref().clone(),
++            settings: thread.restorable_thread_settings().await,
++            client_mcp_extensions: thread.client_mcp_extensions(),
++            auth_manager: thread.identity_auth_manager(),
++        };
++        let mut current_config = old.config.clone();
++        current_config.model = Some(snapshot.model.clone());
++        drop(_permit);
++        let (config, manager) = self
++            .prepare_identity_runtime(&current_config, &params.identity_id)
++            .await?;
++        let _permit = self.acquire_thread_list_state_permit().await?;
++        if !self
++            .thread_manager
++            .get_thread(id)
++            .await
++            .is_ok_and(|current| Arc::ptr_eq(&current, &thread))
++            || self.load_identity_binding(id).await? != previous
++        {
++            return Err(invalid_request(
++                "thread changed during identity preparation; retry",
++            ));
++        }
++        let mut next = old.clone();
++        next.config = config;
++        next.settings.model = next.config.model.clone();
++        if let Some(mode) = next.settings.collaboration_mode.as_mut() {
++            if let Some(model) = next.config.model.as_ref() {
++                mode.settings.model = model.clone();
++            }
++        }
++        next.auth_manager = manager;
++        let binding = IdentityBinding {
++            identity_id: params.identity_id,
++            revision: params
++                .expected_revision
++                .checked_add(1)
++                .ok_or_else(|| invalid_request("identity revision exhausted"))?,
++        };
++        self.thread_store
++            .persist_thread(id, PersistContext::Standard)
++            .await
++            .map_err(|_| internal_error("cannot persist thread before identity replacement"))?;
++        thread
++            .checkpoint_thread_settings()
++            .await
++            .map_err(|_| internal_error("cannot checkpoint thread before identity replacement"))?;
++        let was_subscribed = self
++            .thread_state_manager
++            .subscribed_connection_ids(id)
++            .await
++            .contains(&request_id.connection_id);
++        let result=async {
++        self.ensure_conversation_listener(id, request_id.connection_id, false)
++            .await?;
++        let thread_state = self.thread_state_manager.thread_state(id).await;
++        let drain = thread_state.lock().await.register_shutdown_drain_waiter();
++        if !thread
++            .shutdown_if_idle()
++            .await
++            .map_err(|_| internal_error("cannot drain idle thread"))?
++        {
++            thread_state.lock().await.take_shutdown_drain_waiter();
++            let mut state = self
++                .thread_identity_read(ThreadIdentityReadParams {
++                    thread_id: id.to_string(),
++                })
++                .await?;
++            state.status = "busy".to_string();
++            return Ok(state);
++        }
++        if !matches!(tokio::time::timeout(Duration::from_secs(10), drain).await,Ok(Ok(()))) {
++            thread_state.lock().await.take_shutdown_drain_waiter();
++            self.thread_manager.remove_thread(&id).await;
++            self.finalize_thread_teardown(id).await;
++            return Err(internal_error("identity replacement could not drain its listener; the saved thread can be reopened"));
++        }
++        self.thread_manager.remove_thread(&id).await;
++        self.outgoing.cancel_requests_for_thread(id, None).await;
++        let switched = async {
++            self.save_identity_binding(id, Some(&binding)).await?;
++            self.reload_paginated_thread(
++                &request_id,
++                id,
++                next,
++                client_name.clone(),
++                client_version.clone(),
++            )
++            .await?;
++            Ok::<(), JSONRPCErrorError>(())
++        }
++        .await;
++        if let Err(error) = switched {
++            if let Ok(partial) = self.thread_manager.get_thread(id).await {
++                if !partial
++                    .shutdown_if_idle()
++                    .await
++                    .map_err(|_| internal_error("cannot stop failed identity runtime"))?
++                {
++                    return Err(internal_error(
++                        "replacement runtime became active before rollback; identity requires re-verification",
++                    ));
++                }
++                self.thread_manager.remove_thread(&id).await;
++            }
++            self.save_identity_binding(id, previous.as_ref()).await?;
++            self.reload_paginated_thread(&request_id, id, old, client_name, client_version)
++                .await
++                .map_err(|rollback| {
++                    internal_error(format!(
++                        "identity change failed: {}; original runtime restore failed: {}",
++                        error.message, rollback.message
++                    ))
++                })?;
++            return Err(error);
++        }
++        self.identity_bindings.lock().await.insert(id, binding);
++        self.thread_identity_read(ThreadIdentityReadParams {
++            thread_id: id.to_string(),
++        })
++        .await
++        }.await;
++        if !was_subscribed {
++            self.thread_state_manager
++                .unsubscribe_connection_from_thread(id, request_id.connection_id)
++                .await;
++        }
++        result
++    }
++}
++
++#[cfg(test)]
++mod tests {
++    use super::validate_identity_id;
++
++    #[test]
++    fn identity_references_cannot_escape_the_profile_directory() {
++        for value in [
++            "", "../auth", "..\\auth", "C:\\auth", "a/b", "a:b", ".", "官方",
++        ] {
++            assert!(validate_identity_id(value).is_err());
++        }
++        assert!(validate_identity_id("official_1234-abcd").is_ok());
++    }
++}
+diff --git a/codex-rs/app-server/src/request_processors/thread_processor.rs b/codex-rs/app-server/src/request_processors/thread_processor.rs
+index 321e3ef..6dbb419 100644
+--- a/codex-rs/app-server/src/request_processors/thread_processor.rs
++++ b/codex-rs/app-server/src/request_processors/thread_processor.rs
+@@ -4,6 +4,9 @@ mod daemon_continuation;
+ #[path = "daemon_snapshot.rs"]
+ mod daemon_snapshot;
+ 
++#[path = "thread_identity.rs"]
++mod thread_identity;
++
+ use super::persisted_resume_settings::PersistedResumeSettings;
+ use super::persisted_resume_settings::latest_persisted_resume_settings;
+ use super::thread_enrichment::enrich_loaded_threads;
+@@ -103,10 +106,12 @@ struct PreparedResumeConfig {
+     config: Config,
+ }
+ 
++#[derive(Clone)]
+ struct ThreadRevertRuntimeSnapshot {
+     config: Config,
+     settings: CodexThreadSettingsOverrides,
+     client_mcp_extensions: ClientMcpExtensions,
++    auth_manager: Arc<AuthManager>,
+ }
+ 
+ fn collect_resume_override_mismatches(
+@@ -446,6 +451,9 @@ fn validate_dynamic_tools(tools: &[DynamicToolSpec]) -> Result<(), String> {
+ 
+ #[derive(Clone)]
+ pub(crate) struct ThreadRequestProcessor {
++    identity_bindings: Arc<tokio::sync::Mutex<HashMap<ThreadId, thread_identity::IdentityBinding>>>,
++    identity_auth_cache:
++        Arc<tokio::sync::Mutex<HashMap<String, (codex_login::AuthConfig, Arc<AuthManager>)>>>,
+     pub(super) auth_manager: Arc<AuthManager>,
+     pub(crate) thread_manager: Arc<ThreadManager>,
+     pub(super) outgoing: Arc<OutgoingMessageSender>,
+@@ -505,6 +513,8 @@ impl ThreadRequestProcessor {
+         initial_config_warnings: Vec<ConfigWarningNotification>,
+     ) -> Self {
+         Self {
++            identity_bindings: Arc::default(),
++            identity_auth_cache: Arc::default(),
+             auth_manager,
+             thread_manager,
+             outgoing,
+@@ -2173,6 +2183,7 @@ impl ThreadRequestProcessor {
+             config: thread.config().await.as_ref().clone(),
+             settings: thread.restorable_thread_settings().await,
+             client_mcp_extensions: thread.client_mcp_extensions(),
++            auth_manager: thread.identity_auth_manager(),
+         };
+ 
+         // Subscribe before shutdown so a pending idle unload either rejects this request or can
+@@ -2357,6 +2368,7 @@ impl ThreadRequestProcessor {
+             config,
+             settings,
+             client_mcp_extensions,
++            auth_manager,
+         } = runtime_snapshot;
+         let thread_id_string = thread_id.to_string();
+         let stored_thread = self
+@@ -2380,7 +2392,7 @@ impl ThreadRequestProcessor {
+             .resume_thread_with_history(
+                 config,
+                 thread_history,
+-                self.auth_manager.clone(),
++                auth_manager,
+                 self.request_trace_context(request_id).await,
+                 client_mcp_extensions,
+             )
+@@ -2447,8 +2459,14 @@ impl ThreadRequestProcessor {
+             thread_status,
+             /*has_live_in_progress_turn*/ false,
+         );
+-        let (turns_backwards_cursor, items_backwards_cursor) =
+-            Self::paginated_resume_backwards_cursors(self.thread_store.as_ref(), thread_id).await?;
++        let (turns_backwards_cursor, items_backwards_cursor) = if matches!(
++            codex_thread.config_snapshot().await.history_mode,
++            ThreadHistoryMode::Paginated
++        ) {
++            Self::paginated_resume_backwards_cursors(self.thread_store.as_ref(), thread_id).await?
++        } else {
++            (None, None)
++        };
+         Ok(ThreadRevertResponse {
+             thread,
+             turns_backwards_cursor,
+@@ -4165,6 +4183,18 @@ impl ThreadRequestProcessor {
+             && persisted_metadata
+                 .as_ref()
+                 .is_some_and(|metadata| metadata.reasoning_effort.is_none());
++        if let InitialHistory::Resumed(resumed) = &thread_history
++            && let Some(binding) = self.load_identity_binding(resumed.conversation_id).await?
++        {
++            let (provider_id, provider) =
++                self.pinned_identity_provider(&binding.identity_id).await?;
++            if let Some(provider) = provider {
++                request_overrides
++                    .get_or_insert_with(HashMap::new)
++                    .insert(format!("model_providers.{provider_id}"), provider);
++            }
++            typesafe_overrides.model_provider = Some(provider_id);
++        }
+         let config_state = ResumeConfigState {
+             history_cwd: history_cwd.clone(),
+             workspace_roots: typesafe_overrides.workspace_roots.clone(),
+@@ -4194,12 +4224,30 @@ impl ThreadRequestProcessor {
+             config.model_reasoning_effort = None;
+         }
+ 
++        let restored_identity_id = match &thread_history {
++            InitialHistory::Resumed(resumed) => Some(resumed.conversation_id),
++            _ => None,
++        };
++        let restored_identity = match restored_identity_id {
++            Some(id) => self.load_identity_binding(id).await?,
++            None => None,
++        };
++        let identity_auth_manager = if let Some(binding) = &restored_identity {
++            let (identity_config, manager) = self
++                .prepare_identity_runtime(&config, &binding.identity_id)
++                .await?;
++            config = identity_config;
++            Some(manager)
++        } else {
++            None
++        };
+         let response_history = thread_history.clone();
+ 
+         match self
+             .thread_manager
+             .start_thread(StartThreadOptions {
+                 initial_history: thread_history,
++                identity_auth_manager,
+                 persisted_permission_profile,
+                 parent_trace: match target {
+                     ThreadResumeTarget::Client(request_id) => {
+@@ -4218,6 +4266,12 @@ impl ThreadRequestProcessor {
+                 session_configured,
+                 ..
+             }) => {
++                if let Some(binding) = restored_identity {
++                    self.identity_bindings
++                        .lock()
++                        .await
++                        .insert(thread_id, binding);
++                }
+                 let ThreadResumeTarget::Client(request_id) = target else {
+                     // Observe lifecycle events without attaching a client subscription.
+                     self.thread_watch_manager
+@@ -5282,7 +5336,7 @@ impl ThreadRequestProcessor {
+                 cli_overrides.insert("windows.sandbox".to_string(), serde_json::json!(mode));
+             }
+         }
+-        let request_overrides = if cli_overrides.is_empty() {
++        let mut request_overrides = if cli_overrides.is_empty() {
+             None
+         } else {
+             Some(cli_overrides)
+@@ -5303,6 +5357,17 @@ impl ThreadRequestProcessor {
+             /*personality*/ None,
+         );
+         typesafe_overrides.ephemeral = ephemeral.then_some(true);
++        let inherited_identity = self.load_identity_binding(source_thread_id).await?;
++        if let Some(binding) = inherited_identity.as_ref() {
++            let (provider_id, provider) =
++                self.pinned_identity_provider(&binding.identity_id).await?;
++            if let Some(provider) = provider {
++                request_overrides
++                    .get_or_insert_with(HashMap::new)
++                    .insert(format!("model_providers.{provider_id}"), provider);
++            }
++            typesafe_overrides.model_provider = Some(provider_id);
++        }
+         let restore_approval_policy = typesafe_overrides.approval_policy.is_none();
+         let restore_approvals_reviewer = typesafe_overrides.approvals_reviewer.is_none()
+             && !request_overrides
+@@ -5380,7 +5445,7 @@ impl ThreadRequestProcessor {
+             }
+         }
+         let (inherited_options, inherited_settings) = inherited_fork.unzip();
+-        let options = if let Some(options) = inherited_options {
++        let mut options = if let Some(options) = inherited_options {
+             *options
+         } else {
+             // Derive a Config using the same logic as new conversation, honoring overrides if provided.
+@@ -5394,6 +5459,13 @@ impl ThreadRequestProcessor {
+                 ..StartThreadOptions::new(config)
+             }
+         };
++        if let Some(binding) = inherited_identity.as_ref() {
++            let (config, manager) = self
++                .prepare_identity_runtime(&options.config, &binding.identity_id)
++                .await?;
++            options.config = config;
++            options.identity_auth_manager = Some(manager);
++        }
+         let goals_enabled = options.config.features.enabled(Feature::Goals);
+ 
+         let fallback_model_provider = options.config.model_provider_id.clone();
+@@ -5468,6 +5540,18 @@ impl ThreadRequestProcessor {
+             .await?
+         };
+ 
++        let reserved_thread_id = if inherited_identity.is_some() && !options.config.ephemeral {
++            Some(reserved_thread_id.unwrap_or_else(|| self.thread_manager.reserve_thread_id()))
++        } else {
++            reserved_thread_id
++        };
++        let fork_identity = inherited_identity.map(|source| thread_identity::IdentityBinding {
++            identity_id: source.identity_id,
++            revision: 1,
++        });
++        if let (Some(id), Some(binding)) = (reserved_thread_id, fork_identity.as_ref()) {
++            self.save_identity_binding(id, Some(binding)).await?;
++        }
+         let fork_options = StartThreadOptions {
+             thread_source,
+             parent_trace,
+@@ -5512,6 +5596,12 @@ impl ThreadRequestProcessor {
+             }
+         };
+ 
++        if let Some(binding) = fork_identity {
++            self.identity_bindings
++                .lock()
++                .await
++                .insert(thread_id, binding);
++        }
+         if let Some(settings) = inherited_settings {
+             // Construct the restore future off the fork handler's stack
+             Box::pin(async { Box::pin(forked_thread.restore_thread_settings(*settings)).await })
+diff --git a/codex-rs/core/src/client.rs b/codex-rs/core/src/client.rs
+index ab83a91..6a2818a 100644
+--- a/codex-rs/core/src/client.rs
++++ b/codex-rs/core/src/client.rs
+@@ -267,6 +267,7 @@ impl RequestRouteTelemetry {
+ #[derive(Debug, Clone)]
+ pub struct ModelClient {
+     state: Arc<ModelClientState>,
++    expected_identity: Option<(String, String)>,
+     agent_identity_policy: AgentIdentityAuthPolicy,
+     prompt_cache_key_override: Option<String>,
+     codex_responses_headers: Option<Arc<CodexResponsesHeaders>>,
+@@ -596,6 +597,7 @@ impl ModelClient {
+                 last_inference_tools: StdMutex::new(None),
+             }),
+             agent_identity_policy,
++            expected_identity: None,
+             prompt_cache_key_override: None,
+             codex_responses_headers: None,
+             event_sender: None,
+@@ -613,6 +615,28 @@ impl ModelClient {
+         self
+     }
+ 
++    pub(crate) fn with_expected_identity(mut self, identity: Option<(String, String)>) -> Self {
++        self.expected_identity = identity;
++        self
++    }
++
++    pub(crate) fn expected_identity(&self) -> Option<(String, String)> {
++        self.expected_identity.clone()
++    }
++
++    fn check_expected_identity(&self, auth: Option<&CodexAuth>) -> Result<()> {
++        if let Some((account, user)) = &self.expected_identity {
++            let matches = auth.is_some_and(|auth| {
++                auth.get_account_id().as_ref() == Some(account)
++                    && auth.get_chatgpt_user_id().as_ref() == Some(user)
++            });
++            if !matches {
++                return Err(std::io::Error::other("The session's registered official identity is unavailable; reselect or sign in to that identity").into());
++            }
++        }
++        Ok(())
++    }
++
+     pub(crate) fn reasoning_effort_override_enabled(&self, model_info: &ModelInfo) -> bool {
+         self.state.reasoning_effort_override_enabled
+             && self.state.provider.info().is_openai()
+@@ -1124,6 +1148,7 @@ impl ModelClient {
+         loop {
+             let revision = auth_changes.as_ref().map(|changes| *changes.borrow());
+             let auth = self.state.provider.auth().await;
++            self.check_expected_identity(auth.as_ref())?;
+             let (api_provider, redirect_policy) = match routing {
+                 ClientRouting::Workspace => {
+                     let resolved = self
+diff --git a/codex-rs/core/src/client_tests.rs b/codex-rs/core/src/client_tests.rs
+index 46ac895..7017484 100644
+--- a/codex-rs/core/src/client_tests.rs
++++ b/codex-rs/core/src/client_tests.rs
+@@ -107,6 +107,38 @@ use wiremock::matchers::path;
+ 
+ const TEST_INSTALLATION_ID: &str = "11111111-1111-4111-8111-111111111111";
+ 
++#[tokio::test]
++async fn bound_official_identity_allows_refresh_but_rejects_account_or_user_changes() {
++    let auth = |account: &str, user: &str, nonce: &str| {
++        let claims = serde_json::json!({"https://api.openai.com/auth":{"chatgpt_user_id":user,"chatgpt_account_id":account},"nonce":nonce});
++        let payload = base64::engine::general_purpose::URL_SAFE_NO_PAD
++            .encode(serde_json::to_vec(&claims).unwrap());
++        CodexAuth::from_external_chatgpt_tokens(&format!("e30.{payload}.signature"), account, None)
++            .unwrap()
++    };
++    let mut client = test_model_client(SessionSource::Exec)
++        .with_expected_identity(Some(("account-a".into(), "user-a".into())));
++    for (credential, expected) in [
++        (auth("account-a", "user-a", "initial"), true),
++        (auth("account-a", "user-a", "refreshed"), true),
++        (auth("account-b", "user-a", "other-account"), false),
++        (auth("account-a", "user-b", "other-user"), false),
++        (CodexAuth::from_api_key("synthetic-api"), false),
++    ] {
++        Arc::get_mut(&mut client.state).unwrap().provider = create_model_provider(
++            ModelProviderInfo::create_openai_provider(Some("https://example.invalid/v1".into())),
++            Some(AuthManager::from_auth_for_testing(credential)),
++        );
++        assert_eq!(
++            client
++                .current_client_setup(super::ClientRouting::ConfiguredProvider)
++                .await
++                .is_ok(),
++            expected
++        );
++    }
++}
++
+ fn test_model_client(session_source: SessionSource) -> ModelClient {
+     test_model_client_with_thread_id(ThreadId::new(), session_source)
+ }
+diff --git a/codex-rs/core/src/codex_thread.rs b/codex-rs/core/src/codex_thread.rs
+index 8d2cd83..f10c112 100644
+--- a/codex-rs/core/src/codex_thread.rs
++++ b/codex-rs/core/src/codex_thread.rs
+@@ -778,6 +778,21 @@ impl CodexThread {
+         self.io.agent_status().await
+     }
+ 
++    /// Uses the submission queue so an admitted turn wins over an idle replacement.
++    pub async fn shutdown_if_idle(&self) -> CodexResult<bool> {
++        let (reply, result) = oneshot::channel();
++        self.submit(Op::ShutdownIfIdle { reply }).await?;
++        let stopped = result.await.map_err(|_| CodexErr::InternalAgentDied)?;
++        if stopped {
++            self.io.session_loop_termination.clone().await;
++        }
++        Ok(stopped)
++    }
++
++    pub fn identity_auth_manager(&self) -> Arc<codex_login::AuthManager> {
++        Arc::clone(&self.session.services.auth_manager)
++    }
++
+     pub async fn list_background_terminals(&self) -> Vec<BackgroundTerminalInfo> {
+         self.session.list_background_terminals().await
+     }
+diff --git a/codex-rs/core/src/config/mod.rs b/codex-rs/core/src/config/mod.rs
+index 49bd951..20bc7ce 100644
+--- a/codex-rs/core/src/config/mod.rs
++++ b/codex-rs/core/src/config/mod.rs
+@@ -636,6 +636,9 @@ pub struct Config {
+     /// Optional override of model selection.
+     pub model: Option<String>,
+ 
++    /// Runtime-only account/user binding supplied by the identity controller.
++    pub expected_model_identity: Option<(String, String)>,
++
+     /// Default Daybreak preference for new threads and non-interactive turns.
+     pub daybreak_enabled: bool,
+ 
+@@ -4344,6 +4347,7 @@ impl Config {
+             plugins: cfg.plugins,
+             prefer_mxc,
+             model,
++            expected_model_identity: None,
+             daybreak_enabled: cfg.daybreak.unwrap_or(false),
+             service_tier,
+             review_model,
+diff --git a/codex-rs/core/src/session/handlers.rs b/codex-rs/core/src/session/handlers.rs
+index 72a6b55..930e55d 100644
+--- a/codex-rs/core/src/session/handlers.rs
++++ b/codex-rs/core/src/session/handlers.rs
+@@ -601,6 +601,25 @@ pub(super) async fn submission_loop(
+                     let _ = reply.send(result);
+                     should_exit
+                 }
++                Op::ShutdownIfIdle { reply } => {
++                    let accepted = {
++                        let active = sess.active_turn.lock().await;
++                        if active.is_some() {
++                            false
++                        } else {
++                            sess.state.lock().await.shutting_down = true;
++                            true
++                        }
++                    };
++                    if accepted {
++                        let stopped = shutdown(&sess, sub.id.clone()).await;
++                        let _ = reply.send(stopped);
++                        stopped
++                    } else {
++                        let _ = reply.send(false);
++                        false
++                    }
++                }
+                 Op::ThreadSettings {
+                     thread_settings,
+                     reply,
+diff --git a/codex-rs/core/src/session/session.rs b/codex-rs/core/src/session/session.rs
+index 5cd89a8..ce3adf4 100644
+--- a/codex-rs/core/src/session/session.rs
++++ b/codex-rs/core/src/session/session.rs
+@@ -1783,6 +1783,7 @@ impl Session {
+                     extensions.model_request_contributors().to_vec(),
+                 )
+                 .with_executed_tool_calls(executed_tool_calls.clone())
++                .with_expected_identity(config.expected_model_identity.clone())
+                 .with_restored_history(matches!(
+                     &initial_history,
+                     InitialHistory::Resumed(_) | InitialHistory::Forked(_)
+diff --git a/codex-rs/core/src/session/turn_input.rs b/codex-rs/core/src/session/turn_input.rs
+index 74a7592..8e8c28b 100644
+--- a/codex-rs/core/src/session/turn_input.rs
++++ b/codex-rs/core/src/session/turn_input.rs
+@@ -516,6 +516,11 @@ async fn start_if_idle(
+ 
+     let turn_state = {
+         let mut active_turn = session.active_turn.lock().await;
++        if session.state.lock().await.shutting_down {
++            return Ok(TurnInputSubmission::NotSubmitted {
++                reason: NotSubmittedReason::ServerDraining,
++            });
++        }
+         if active_turn.is_some() {
+             return Ok(TurnInputSubmission::NotSubmitted {
+                 reason: NotSubmittedReason::NotIdle,
+diff --git a/codex-rs/core/src/thread_manager.rs b/codex-rs/core/src/thread_manager.rs
+index a0b6f16..e987984 100644
+--- a/codex-rs/core/src/thread_manager.rs
++++ b/codex-rs/core/src/thread_manager.rs
+@@ -268,6 +268,9 @@ pub struct InternalSessionParent {
+ 
+ pub struct StartThreadOptions {
+     pub config: Config,
++    /// Host-resolved authentication for this thread. The host must validate identity
++    /// policy before supplying it; this does not mutate the process-wide manager.
++    pub identity_auth_manager: Option<Arc<AuthManager>>,
+     /// Host-owned provider for this root thread's additional instructions.
+     ///
+     /// Core composes these after the global [`UserInstructionsProvider`]
+@@ -313,6 +316,7 @@ impl StartThreadOptions {
+     pub fn new(config: Config) -> Self {
+         Self {
+             config,
++            identity_auth_manager: None,
+             thread_instructions_provider: None,
+             allow_provider_model_fallback: false,
+             initial_history: InitialHistory::New,
+@@ -353,10 +357,11 @@ struct ThreadSpawnRequest {
+ 
+ impl ThreadSpawnRequest {
+     fn new(
+-        options: StartThreadOptions,
++        mut options: StartThreadOptions,
+         auth_manager: Arc<AuthManager>,
+         agent_control: impl Into<AgentControlInit>,
+     ) -> Self {
++        let auth_manager = options.identity_auth_manager.take().unwrap_or(auth_manager);
+         Self {
+             startup: None,
+             options,
+@@ -1164,6 +1169,11 @@ impl ThreadManager {
+         );
+         options.thread_source = options.thread_source.take().or(resumed_thread_source);
+         let parent = options.internal_parent.take();
++        if parent.is_some() && options.identity_auth_manager.is_some() {
++            return Err(CodexErr::InvalidRequest(
++                "internal children must inherit their captured parent's authentication".to_owned(),
++            ));
++        }
+         if parent.is_some()
+             && (!matches!(options.session_source, Some(SessionSource::Internal(_)))
+                 || matches!(options.initial_history, InitialHistory::Resumed(_)))
+@@ -1974,6 +1984,14 @@ impl ThreadManagerState {
+     ) -> CodexResult<NewThread> {
+         options.client_mcp_extensions =
+             self.client_mcp_extensions_for_child(parent_thread_id).await;
++        if options.identity_auth_manager.is_none()
++            && let Some(parent_id) = parent_thread_id
++        {
++            let parent = self.get_thread(parent_id).await?;
++            options.identity_auth_manager = Some(parent.identity_auth_manager());
++            options.config.expected_model_identity =
++                parent.session.services.model_client.expected_identity();
++        }
+         let forked = matches!(options.initial_history, InitialHistory::Forked(_));
+         let mut request =
+             ThreadSpawnRequest::new(options, Arc::clone(&self.auth_manager), agent_control);
+@@ -1991,7 +2009,7 @@ impl ThreadManagerState {
+         options: ResumeThreadWithHistoryOptions,
+     ) -> CodexResult<NewThread> {
+         let ResumeThreadWithHistoryOptions {
+-            config,
++            mut config,
+             initial_history,
+             agent_control,
+             session_source,
+@@ -2007,8 +2025,18 @@ impl ThreadManagerState {
+             None => self.client_mcp_extensions_for_child(parent_thread_id).await,
+         };
+         let thread_source = initial_history.get_resumed_thread_source();
++        let identity_auth_manager = match parent_thread_id {
++            Some(parent_id) => {
++                let parent = self.get_thread(parent_id).await?;
++                config.expected_model_identity =
++                    parent.session.services.model_client.expected_identity();
++                Some(parent.identity_auth_manager())
++            }
++            None => None,
++        };
+         let options = StartThreadOptions {
+             initial_history,
++            identity_auth_manager,
+             session_source: Some(session_source),
+             thread_source,
+             environments: environment_selections.map(|selections| {
+@@ -2086,6 +2114,7 @@ impl ThreadManagerState {
+         };
+         let StartThreadOptions {
+             mut config,
++            identity_auth_manager: _,
+             thread_instructions_provider,
+             allow_provider_model_fallback,
+             initial_history,
+@@ -2307,6 +2336,14 @@ impl ThreadManagerState {
+         };
+         let attachment_source =
+             forked_from_thread_id.filter(|_| matches!(&initial_history, InitialHistory::Forked(_)));
++        // An identity override must not consult the process account's model catalog.
++        let models_manager = if Arc::ptr_eq(&auth_manager, &self.auth_manager)
++            && config.expected_model_identity.is_none()
++        {
++            Arc::clone(&self.models_manager)
++        } else {
++            build_models_manager(&config, Arc::clone(&auth_manager))
++        };
+         let spawn_result = Session::spawn(SessionSpawnArgs {
+             startup,
+             config,
+@@ -2314,7 +2351,7 @@ impl ThreadManagerState {
+             instructions,
+             installation_id: self.installation_id.clone(),
+             auth_manager,
+-            models_manager: Arc::clone(&self.models_manager),
++            models_manager,
+             git_root_discovery: Arc::clone(&self.git_root_discovery),
+             environment_manager: Arc::clone(&self.environment_manager),
+             skills_service: Arc::clone(&self.skills_service),
+diff --git a/codex-rs/core/src/thread_manager_tests.rs b/codex-rs/core/src/thread_manager_tests.rs
+index df585fa..5e1e71f 100644
+--- a/codex-rs/core/src/thread_manager_tests.rs
++++ b/codex-rs/core/src/thread_manager_tests.rs
+@@ -56,8 +56,89 @@ use wiremock::MockServer;
+ 
+ const TEST_INSTALLATION_ID: &str = "11111111-1111-4111-8111-111111111111";
+ 
++#[tokio::test]
++async fn identity_auth_overrides_do_not_share_the_process_account_or_catalog() {
++    let temp_dir = tempdir().expect("tempdir");
++    let mut config = test_config().await;
++    config.codex_home = temp_dir.path().join("codex-home").abs();
++    config.cwd = config.codex_home.abs();
++    std::fs::create_dir_all(&config.codex_home).expect("create codex home");
++    let manager = ThreadManager::with_models_provider_and_home_for_tests(
++        CodexAuth::from_api_key("process-test-marker"),
++        config.model_provider.clone(),
++        config.codex_home.to_path_buf(),
++        Arc::new(codex_exec_server::EnvironmentManager::default_for_tests()),
++    );
++    let first_auth =
++        AuthManager::from_auth_for_testing(CodexAuth::from_api_key("first-test-marker"));
++    let second_auth =
++        AuthManager::from_auth_for_testing(CodexAuth::from_api_key("second-test-marker"));
++    let mut threads = Vec::new();
++    for auth in [first_auth.clone(), second_auth.clone()] {
++        let thread = manager
++            .start_thread(StartThreadOptions {
++                identity_auth_manager: Some(auth.clone()),
++                environments: Some(Vec::new()),
++                ..StartThreadOptions::new(config.clone())
++            })
++            .await
++            .expect("start identity-bound thread");
++        assert!(Arc::ptr_eq(
++            &thread.thread.session.services.auth_manager,
++            &auth
++        ));
++        assert!(!Arc::ptr_eq(
++            &thread.thread.session.services.models_manager,
++            &manager.state.models_manager,
++        ));
++        threads.push(thread.thread);
++    }
++    assert!(!Arc::ptr_eq(
++        &threads[0].session.services.models_manager,
++        &threads[1].session.services.models_manager,
++    ));
++    assert_eq!(
++        manager
++            .auth_manager()
++            .auth_cached()
++            .and_then(|auth| auth.api_key().map(str::to_owned)),
++        Some("process-test-marker".to_owned()),
++    );
++    for thread in threads {
++        thread.shutdown_and_wait().await.expect("shutdown thread");
++    }
++}
++
+ struct ParentInstructionsProvider(codex_extension_api::Instructions);
+ 
++#[tokio::test]
++async fn identity_shutdown_refuses_an_admitted_turn_then_closes_when_idle() {
++    let temp_dir = tempdir().expect("tempdir");
++    let mut config = test_config().await;
++    config.codex_home = temp_dir.path().join("codex-home").abs();
++    config.cwd = config.codex_home.abs();
++    std::fs::create_dir_all(&config.codex_home).expect("create codex home");
++    let manager = ThreadManager::with_models_provider_and_home_for_tests(
++        CodexAuth::from_api_key("synthetic-test-marker"),
++        config.model_provider.clone(),
++        config.codex_home.to_path_buf(),
++        Arc::new(codex_exec_server::EnvironmentManager::default_for_tests()),
++    );
++    let thread = manager
++        .start_thread(StartThreadOptions {
++            environments: Some(Vec::new()),
++            ..StartThreadOptions::new(config)
++        })
++        .await
++        .expect("start thread")
++        .thread;
++    *thread.session.active_turn.lock().await = Some(crate::state::ActiveTurn::default());
++    assert!(!thread.shutdown_if_idle().await.expect("busy result"));
++    assert!(thread.is_running());
++    *thread.session.active_turn.lock().await = None;
++    assert!(thread.shutdown_if_idle().await.expect("idle shutdown"));
++}
++
+ impl codex_extension_api::UserInstructionsProvider for ParentInstructionsProvider {
+     fn load_user_instructions(&self) -> codex_extension_api::LoadInstructionsFuture<'_> {
+         Box::pin(async move {
+diff --git a/codex-rs/protocol/src/protocol.rs b/codex-rs/protocol/src/protocol.rs
+index 17888ed..d299b70 100644
+--- a/codex-rs/protocol/src/protocol.rs
++++ b/codex-rs/protocol/src/protocol.rs
+@@ -720,6 +720,10 @@ pub enum Op {
+         reply: oneshot::Sender<CodexResult<SuspendTurnOutcome>>,
+     },
+ 
++    /// Close an idle runtime without interrupting an admitted turn.
++    #[debug("ShutdownIfIdle")]
++    ShutdownIfIdle { reply: oneshot::Sender<bool> },
++
+     /// Apply thread-settings overrides without starting a turn.
+     ///
+     /// This uses the same submission queue as turn starts so app-server can
+@@ -1066,6 +1070,7 @@ impl Op {
+             Self::Review { .. } => "review",
+             Self::ApproveGuardianDeniedAction { .. } => "approve_guardian_denied_action",
+             Self::Shutdown => "shutdown",
++            Self::ShutdownIfIdle { .. } => "shutdown_if_idle",
+             Self::RunUserShellCommand { .. } => "run_user_shell_command",
+         }
+     }

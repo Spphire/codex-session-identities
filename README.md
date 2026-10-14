@@ -1,0 +1,45 @@
+# Codex Session Identities
+
+An unofficial Windows sidecar and replayable source patches for OpenAI Codex Desktop. Assign a separate official ChatGPT account or API provider to each local chat, while retaining its ID, history and working directory.
+
+This is not an official OpenAI product, and is not a supported Desktop plugin API. It launches the installed Desktop with a bridge and a patched open-source app-server; it does not modify the Desktop installation files. Upstream updates require compatibility testing, not just reapplying a patch.
+
+## Install
+
+Download the Windows ZIP from this repository's Releases, extract it and run `Install.ps1`. An existing Windows Codex Desktop installation is required. Close Codex once and start it with the new **Codex - Session Identities** desktop shortcut. The launcher starts the panel service and tray icon together. Open the panel from the tray icon.
+
+See [USER-GUIDE.md](USER-GUIDE.md) for installation, identity registration, switching, rollback and updates. The installer discovers the original CLI and copies its execution-host companions. Do not deploy only the patched backend executable.
+
+## Features
+
+- Independent official and API identities per chat; system official login and separately registered official accounts.
+- Busy switches wait until idle; saved and runtime-confirmed bindings are distinguished.
+- Account/user fencing, sibling isolation, cold-chat binding and child/fork inheritance.
+- Official identities display the matching account email when available.
+- Authenticated loopback panel, single-instance tray and reusable dedicated Edge/Chrome panel window.
+- Restart launcher, installed-model catalog compatibility and execution-host synchronization.
+
+## Build And Test
+
+See [BUILDING.md](BUILDING.md). The repository contains the sidecar and a patch series, not a forked copy of the entire upstream tree.
+
+```powershell
+npm test
+powershell -NoProfile -ExecutionPolicy Bypass -File test/vault-test.ps1
+```
+
+Node.js 24 or newer is required for the built-in SQLite API. No npm dependencies are needed. Tests use synthetic credentials and temporary directories; they do not log in to real accounts.
+
+## Compatibility And Limits
+
+The tested baseline is Windows Desktop `26.1007.2314.0`, installed CLI `0.162.0-alpha.17.2`, and upstream commit `0c7362d121d1c7f69540262425fd4e2209fd8e8d`. See [VALIDATION.md](VALIDATION.md). Other versions and platforms are not validated.
+
+Fast availability in the Desktop UI is still gated by the host account. Use an official host login for that UI capability; per-chat identities do not migrate third-party connector authorizations. Model availability and quota remain subject to each provider and account. Switching can reset temporary tool memory, but preserves files and conversation history.
+
+The bridge supplies the installed CLI version for official model requests and catalog lookup. This does not grant additional account access or model entitlement.
+
+## Security And License
+
+Never commit auth files, access tokens, API keys, private profile homes or session databases. API credentials use Windows Credential Manager; independent official profiles are private credential homes with DPAPI-backed import. The panel does not receive those secrets. See [SECURITY.md](SECURITY.md).
+
+Apache-2.0; upstream attribution is preserved in LICENSE and NOTICE. Windows releases include Node.js and its license. Codex Desktop itself is not redistributed. The project is experimental; back up your configuration and validate on non-critical chats before use.

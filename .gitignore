@@ -1,0 +1,17 @@
+*.exe
+*.pdb
+*.zip
+*.log
+node_modules/
+dist/
+upstream/
+target/
+runtime-config.json
+launcher-status.json
+panel-window-status.json
+auth.json
+.env
+.env.*
+session-identities/
+identity-switcher/
+verification-home*/

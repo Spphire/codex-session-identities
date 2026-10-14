@@ -1,0 +1,9 @@
+{
+  "summary": "../VALIDATION.md",
+  "testedDesktop": "26.1007.2314.0",
+  "originalCli": "0.162.0-alpha.17.2",
+  "backendSha256": "01FE2ECE2C2A8F1572A1823F94D0B08C8483723894EE50F462E4CBA0F9D1F57A",
+  "nodeTests": {"passed": 27, "failed": 0},
+  "rustTests": {"threadManagerPassed": 44, "officialIdentityFencePassed": 1},
+  "scope": "Experimental Windows release on the pinned baseline. Raw private-account reports are not distributed."
+}

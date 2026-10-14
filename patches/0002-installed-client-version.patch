@@ -1,0 +1,35 @@
+diff --git a/codex-rs/model-provider-info/src/lib.rs b/codex-rs/model-provider-info/src/lib.rs
+index f020d34..e6d84ca 100644
+--- a/codex-rs/model-provider-info/src/lib.rs
++++ b/codex-rs/model-provider-info/src/lib.rs
+@@ -445,6 +445,12 @@ other non-default provider fields are not supported"
+             .unwrap_or_else(|| default_base_url.to_string());
+ 
+         let mut headers = self.build_header_map()?;
++        if matches!(auth_mode, Some(AuthMode::Chatgpt | AuthMode::ChatgptAuthTokens))
++            && let Ok(version) = std::env::var("CODEX_IDENTITY_CLIENT_VERSION")
++            && let Ok(value) = HeaderValue::from_str(&version)
++        {
++            headers.insert("version", value);
++        }
+         if let Some(requirement) = read_managed_residency_requirement() {
+             let value = match requirement {
+                 ResidencyRequirement::Us => HeaderValue::from_static("us"),
+diff --git a/codex-rs/models-manager/src/lib.rs b/codex-rs/models-manager/src/lib.rs
+index cd7b59a..7aa2c47 100644
+--- a/codex-rs/models-manager/src/lib.rs
++++ b/codex-rs/models-manager/src/lib.rs
+@@ -17,6 +17,13 @@ pub fn bundled_models_response()
+ 
+ /// Convert the client version string to a whole version string (e.g. "1.2.3-alpha.4" -> "1.2.3").
+ pub fn client_version_to_whole() -> String {
++    if let Ok(version) = std::env::var("CODEX_IDENTITY_CLIENT_VERSION") {
++        let whole = version.split('-').next().unwrap_or_default();
++        let parts: Vec<_> = whole.split('.').collect();
++        if parts.len() == 3 && parts.iter().all(|part| part.parse::<u64>().is_ok()) {
++            return whole.to_string();
++        }
++    }
+     format!(
+         "{}.{}.{}",
+         env!("CARGO_PKG_VERSION_MAJOR"),
