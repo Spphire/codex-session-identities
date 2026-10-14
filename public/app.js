@@ -8,9 +8,12 @@ let refreshing = false;
 let identityDetail = null;
 let submitting = false;
 let deleting=false;
+let identityPollTimer=null;
+const rowCache=new Map();
+const dateFormatter=new Intl.DateTimeFormat('zh-CN',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'});
 const identityName=id=>state?.identities.find(x=>x.runtimeIds?.includes(id)||x.runtimeId===id)?.name || id || '未固定身份';
 const rowIdentity=row=>row.identityState==='verified'?identityName(row.identityId):row.identityId?identityName(row.identityId)+'（待核验）':'未固定身份';
-const date = seconds => new Date(seconds * 1000).toLocaleString('zh-CN', { month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit' });
+const date = seconds => dateFormatter.format(new Date(seconds * 1000));
 function element(tag, text, className) { const e=document.createElement(tag); e.textContent=text; if(className)e.className=className; return e; }
 function renderDetail() {
   const row = state?.sessions.find(x => x.id === selected);
@@ -29,14 +32,36 @@ function renderRows() {
   if (!state) return;
   const query=$('search').value.trim().toLowerCase();
   const rows=state.sessions.filter(x => ($('archived').checked || !x.archived) && (!$('provider').value || x.provider===$('provider').value) && `${x.title} ${x.id} ${x.cwd}`.toLowerCase().includes(query));
-  $('rows').replaceChildren(); $('count').textContent=String(rows.length); $('empty').hidden=rows.length>0;
+  const body=$('rows');const existing=new Set(state.sessions.map(x=>x.id));
+  for(const [id,entry] of rowCache)if(!existing.has(id)){entry.tr.remove();rowCache.delete(id);}
+  $('count').textContent=String(rows.length); $('empty').hidden=rows.length>0;
+  let position=body.firstElementChild;
+  const visible=new Set();
   for(const row of rows){
-    const tr=document.createElement('tr'); tr.tabIndex=0; tr.setAttribute('aria-selected',String(selected===row.id)); if(selected===row.id)tr.classList.add('selected');
-    const title=document.createElement('td'); title.append(element('div',row.title,'session-title'),element('div',row.id.slice(0,18),'session-id'));
-    tr.append(title,element('td',row.provider,'provider'),element('td',rowIdentity(row),'unknown'),element('td',date(row.updatedAt),'date'));
-    const choose=()=>{selected=row.id;identityDetail=null;renderRows();renderDetail();void loadIdentity();}; tr.addEventListener('click',choose); tr.addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();choose();}});
-    $('rows').append(tr);
+    visible.add(row.id);
+    let entry=rowCache.get(row.id);
+    if(!entry){
+      const tr=document.createElement('tr');tr.tabIndex=0;tr.dataset.threadId=row.id;
+      const title=element('div',row.title,'session-title');const first=document.createElement('td');
+      first.append(title,element('div',row.id.slice(0,18),'session-id'));
+      entry={tr,title,provider:element('td',row.provider,'provider'),identity:element('td','','unknown'),date:element('td','','date')};
+      tr.append(first,entry.provider,entry.identity,entry.date);
+      const id=row.id;
+      const choose=()=>{selected=id;identityDetail=null;clearTimeout(identityPollTimer);renderRows();renderDetail();void loadIdentity();};
+      tr.addEventListener('click',choose);tr.addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();choose();}});
+      rowCache.set(id,entry);
+    }
+    const name=rowIdentity(row);
+    if(entry.title.textContent!==row.title)entry.title.textContent=row.title;
+    if(entry.provider.textContent!==row.provider)entry.provider.textContent=row.provider;
+    if(entry.identity.textContent!==name)entry.identity.textContent=name;
+    if(entry.updatedAt!==row.updatedAt){entry.date.textContent=date(row.updatedAt);entry.updatedAt=row.updatedAt;}
+    const active=selected===row.id;
+    if(entry.selected!==active){entry.tr.setAttribute('aria-selected',String(active));entry.tr.classList.toggle('selected',active);entry.selected=active;}
+    if(entry.tr===position)position=position.nextElementSibling;
+    else body.insertBefore(entry.tr,position);
   }
+  for(const child of [...body.children])if(!visible.has(child.dataset.threadId))child.remove();
 }
 async function refresh(){
   if(refreshing||deleting)return; refreshing=true; $('refresh').disabled=true;
@@ -94,12 +119,14 @@ async function removeIdentity(identity){
   await refresh();
 }
 async function loadIdentity(){
+  clearTimeout(identityPollTimer);
   const id=selected;if(!id||!state?.runtime.connected)return;
   try {
     const response=await apiFetch(`/api/identity?threadId=${encodeURIComponent(id)}`);const value=await response.json();if(!response.ok)throw new Error(value.error);
     if(selected!==id)return;identityDetail=value;
     const row=state.sessions.find(x=>x.id===id);if(row){row.identityId=value.identityId;row.identityState=value.verified?'verified':'unverified';}
     renderRows();renderDetail();
+    if(!document.hidden&&value.queue?.pending&&!value.queue.errorCode)identityPollTimer=setTimeout(()=>void loadIdentity(),400);
   }catch(error){if(selected===id){identityDetail=null;renderDetail();$('switch-reason').textContent=error.message;}}
 }
 async function mutate(cancel=false){
@@ -113,5 +140,6 @@ async function mutate(cancel=false){
 }
 $('identity').addEventListener('change',renderDetail);$('switch').addEventListener('click',()=>mutate());$('cancel-switch').addEventListener('click',()=>mutate(true));
 $('search').addEventListener('input',renderRows); $('provider').addEventListener('change',renderRows); $('archived').addEventListener('change',renderRows); $('refresh').addEventListener('click',refresh);
-setInterval(refresh,5000);refresh();
+setInterval(()=>{if(!document.hidden)void refresh();},5000);refresh();
+document.addEventListener('visibilitychange',()=>{clearTimeout(identityPollTimer);if(!document.hidden)void refresh();});
 addEventListener('hashchange',()=>{acceptAccess();void refresh();});

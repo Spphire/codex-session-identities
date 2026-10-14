@@ -1,0 +1,307 @@
+{
+  "date": "2026-10-14T11:41:26.358Z",
+  "node": "v24.19.0",
+  "cpu": "13th Gen Intel(R) Core(TM) i5-13600KF",
+  "logicalProcessors": 20,
+  "originalVersion": "codex-cli 0.162.0-alpha.17.2",
+  "backendSha256": "ae4a715f6493f909b49d046f8379ca42d2401384cf8ca14f89d6e99a8d74efaa",
+  "samples": 5,
+  "isolated": true,
+  "synthetic": true,
+  "modes": {
+    "original": {
+      "startup": {
+        "n": 5,
+        "medianMs": 175.381,
+        "p95Ms": 177.448,
+        "minMs": 82.172,
+        "maxMs": 177.448
+      },
+      "installedVersionReported": true,
+      "accountRead": {
+        "n": 100,
+        "medianMs": 1.492,
+        "p95Ms": 1.942,
+        "minMs": 1.325,
+        "maxMs": 2.471
+      },
+      "threadList": {
+        "n": 30,
+        "medianMs": 0.266,
+        "p95Ms": 0.404,
+        "minMs": 0.221,
+        "maxMs": 0.585
+      },
+      "modelListFirst": {
+        "n": 1,
+        "medianMs": 0.996,
+        "p95Ms": 0.996,
+        "minMs": 0.996,
+        "maxMs": 0.996
+      },
+      "modelListCached": {
+        "n": 10,
+        "medianMs": 0.749,
+        "p95Ms": 0.836,
+        "minMs": 0.694,
+        "maxMs": 0.836
+      },
+      "commandExec": {
+        "n": 15,
+        "medianMs": 27.862,
+        "p95Ms": 70.058,
+        "minMs": 26.693,
+        "maxMs": 70.058
+      },
+      "powershellExec": {
+        "n": 5,
+        "medianMs": 206.884,
+        "p95Ms": 216.464,
+        "minMs": 201.853,
+        "maxMs": 216.464
+      },
+      "syntheticTurns": {
+        "n": 10,
+        "medianMs": 31.264,
+        "p95Ms": 149.149,
+        "minMs": 16.453,
+        "maxMs": 149.149
+      },
+      "streaming1000Deltas": {
+        "n": 3,
+        "medianMs": 31.235,
+        "p95Ms": 76.825,
+        "minMs": 31.142,
+        "maxMs": 76.825
+      },
+      "streamingNotifications": 3010,
+      "idleResources": {
+        "wallMs": 10275,
+        "processes": [
+          {
+            "role": "backend",
+            "workingSetMiB": 85.57,
+            "privateMiB": 32.4,
+            "cpuSeconds": 0
+          }
+        ]
+      }
+    },
+    "patched": {
+      "startup": {
+        "n": 5,
+        "medianMs": 217.149,
+        "p95Ms": 628.301,
+        "minMs": 119.03,
+        "maxMs": 628.301
+      },
+      "installedVersionReported": true,
+      "accountRead": {
+        "n": 100,
+        "medianMs": 0.829,
+        "p95Ms": 1.079,
+        "minMs": 0.702,
+        "maxMs": 1.29
+      },
+      "threadList": {
+        "n": 30,
+        "medianMs": 0.269,
+        "p95Ms": 0.527,
+        "minMs": 0.209,
+        "maxMs": 0.771
+      },
+      "modelListFirst": {
+        "n": 1,
+        "medianMs": 0.867,
+        "p95Ms": 0.867,
+        "minMs": 0.867,
+        "maxMs": 0.867
+      },
+      "modelListCached": {
+        "n": 10,
+        "medianMs": 0.748,
+        "p95Ms": 0.802,
+        "minMs": 0.705,
+        "maxMs": 0.802
+      },
+      "commandExec": {
+        "n": 15,
+        "medianMs": 27.45,
+        "p95Ms": 30.808,
+        "minMs": 26.296,
+        "maxMs": 30.808
+      },
+      "powershellExec": {
+        "n": 5,
+        "medianMs": 206.602,
+        "p95Ms": 223.024,
+        "minMs": 202.427,
+        "maxMs": 223.024
+      },
+      "syntheticTurns": {
+        "n": 10,
+        "medianMs": 31.237,
+        "p95Ms": 160.694,
+        "minMs": 30.341,
+        "maxMs": 160.694
+      },
+      "streaming1000Deltas": {
+        "n": 3,
+        "medianMs": 46.602,
+        "p95Ms": 62.31,
+        "minMs": 45.7,
+        "maxMs": 62.31
+      },
+      "streamingNotifications": 3010,
+      "idleSwitch": {
+        "n": 20,
+        "medianMs": 33.773,
+        "p95Ms": 45.155,
+        "minMs": 32.454,
+        "maxMs": 141.359
+      },
+      "switchAndRoutedReply": {
+        "n": 6,
+        "medianMs": 62.667,
+        "p95Ms": 77.942,
+        "minMs": 58.308,
+        "maxMs": 77.942
+      },
+      "idleResources": {
+        "wallMs": 10272,
+        "processes": [
+          {
+            "role": "backend",
+            "workingSetMiB": 92.59,
+            "privateMiB": 39.2,
+            "cpuSeconds": 0.03125
+          }
+        ]
+      }
+    },
+    "bridge": {
+      "startup": {
+        "n": 5,
+        "medianMs": 389.684,
+        "p95Ms": 505.836,
+        "minMs": 380.265,
+        "maxMs": 505.836
+      },
+      "installedVersionReported": true,
+      "accountRead": {
+        "n": 100,
+        "medianMs": 0.949,
+        "p95Ms": 1.317,
+        "minMs": 0.798,
+        "maxMs": 1.657
+      },
+      "threadList": {
+        "n": 30,
+        "medianMs": 0.366,
+        "p95Ms": 0.576,
+        "minMs": 0.266,
+        "maxMs": 0.684
+      },
+      "modelListFirst": {
+        "n": 1,
+        "medianMs": 146.542,
+        "p95Ms": 146.542,
+        "minMs": 146.542,
+        "maxMs": 146.542
+      },
+      "modelListCached": {
+        "n": 10,
+        "medianMs": 1.081,
+        "p95Ms": 1.594,
+        "minMs": 0.953,
+        "maxMs": 1.594
+      },
+      "commandExec": {
+        "n": 15,
+        "medianMs": 27.821,
+        "p95Ms": 30.559,
+        "minMs": 27.145,
+        "maxMs": 30.559
+      },
+      "powershellExec": {
+        "n": 5,
+        "medianMs": 203.598,
+        "p95Ms": 210.483,
+        "minMs": 201.963,
+        "maxMs": 210.483
+      },
+      "syntheticTurns": {
+        "n": 10,
+        "medianMs": 31.538,
+        "p95Ms": 226.856,
+        "minMs": 30.397,
+        "maxMs": 226.856
+      },
+      "streaming1000Deltas": {
+        "n": 3,
+        "medianMs": 46.489,
+        "p95Ms": 47.228,
+        "minMs": 31.705,
+        "maxMs": 47.228
+      },
+      "streamingNotifications": 3010,
+      "idleSwitch": {
+        "n": 20,
+        "medianMs": 34.646,
+        "p95Ms": 39.664,
+        "minMs": 33.552,
+        "maxMs": 46.705
+      },
+      "switchAndRoutedReply": {
+        "n": 6,
+        "medianMs": 61.905,
+        "p95Ms": 76.626,
+        "minMs": 60.959,
+        "maxMs": 76.626
+      },
+      "panelIdleSwitch": {
+        "n": 10,
+        "medianMs": 38.568,
+        "p95Ms": 49.738,
+        "minMs": 37.293,
+        "maxMs": 49.738
+      },
+      "busySwitch": {
+        "heldMs": 107.694,
+        "afterReleaseMs": 85.702
+      },
+      "idleResources": {
+        "wallMs": 10276,
+        "processes": [
+          {
+            "role": "backend",
+            "workingSetMiB": 94.11,
+            "privateMiB": 40.2,
+            "cpuSeconds": 0.03125
+          },
+          {
+            "role": "bridge",
+            "workingSetMiB": 83.74,
+            "privateMiB": 60.09,
+            "cpuSeconds": 0
+          }
+        ]
+      }
+    }
+  },
+  "installedVersionProbe": {
+    "n": 5,
+    "medianMs": 56.095,
+    "p95Ms": 72.16,
+    "minMs": 55.22,
+    "maxMs": 72.16
+  },
+  "companionHashCheck": {
+    "n": 5,
+    "medianMs": 154.119,
+    "p95Ms": 198.721,
+    "minMs": 152.703,
+    "maxMs": 198.721
+  },
+  "passed": true
+}

@@ -1,9 +1,11 @@
 import { readdir, readFile, stat } from 'node:fs/promises';
 import { createConnection } from 'node:net';
 import { join } from 'node:path';
+import { EventEmitter } from 'node:events';
 
-export class BridgeClient {
+export class BridgeClient extends EventEmitter {
   constructor(codexDirectory) {
+    super();
     this.directory=join(codexDirectory,'session-identities','runtimes');
     this.socket=null;this.ready=false;this.pid=null;this.pending=new Map();this.sequence=0;this.connecting=null;
     this.reason='尚未加载身份桥接后端';
@@ -68,6 +70,9 @@ export class BridgeClient {
       let message;try{message=JSON.parse(line);}catch{state.socket.destroy();return;}
       if(message.protocol===1 && typeof message.ready==='boolean'){
         this.ready=message.ready;this.reason=message.ready?'已连接身份后端':'等待桌面初始化后端';continue;
+      }
+      if(message.id==null&&['turn/completed','thread/status/changed','thread/started'].includes(message.method)){
+        this.emit('lifecycle',message);continue;
       }
       const pending=this.pending.get(message.id);if(!pending)continue;
       this.pending.delete(message.id);clearTimeout(pending.timeout);

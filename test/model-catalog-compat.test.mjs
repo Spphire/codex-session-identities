@@ -5,7 +5,7 @@ import {mkdtemp,copyFile,writeFile,rm} from 'node:fs/promises';
 import {join,resolve} from 'node:path';
 import {tmpdir} from 'node:os';
 import {StdioClient} from '../stdio-client.mjs';
-const {mergePage,validParams}=createRequire(import.meta.url)('../model-catalog-compat.cjs');
+const {mergePage,validParams,InstalledModelCatalog}=createRequire(import.meta.url)('../model-catalog-compat.cjs');
 const native={data:[{id:'shared',model:'shared',displayName:'Current name',isDefault:true,hidden:false},{id:'hidden',model:'hidden',hidden:true}],nextCursor:null};
 const installed=[{id:'new',model:'new',displayName:'Installed alias',isDefault:true,hidden:false},{id:'shared',model:'shared',displayName:'Old name'},{id:'old-hidden',model:'old-hidden',hidden:true}];
 
@@ -29,6 +29,20 @@ test('merged catalog paginates after visibility filtering without duplicate entr
 test('malformed pagination and visibility parameters remain subject to native validation',()=>{
   for(const value of [{limit:-1},{limit:1.2},{limit:2**32},{cursor:'-1'},{cursor:'wrong'},{includeHidden:'false'},[]])assert.equal(validParams(value),false);
   for(const value of [null,{}, {limit:0,cursor:'0',includeHidden:false}])assert.equal(validParams(value),true);
+});
+
+test('ready catalog does not wait for helper teardown; refresh remains serialized and invalidated',async t=>{
+  const home=await mkdtemp(join(tmpdir(),'identity-catalog-cleanup-'));
+  const script=`require('node:readline').createInterface({input:process.stdin}).on('line',line=>{const v=JSON.parse(line);if(v.id!=null)process.stdout.write(JSON.stringify({id:v.id,result:v.method==='model/list'?{data:[{model:'fixture'}],nextCursor:null}:{}})+'\\n');}).on('close',()=>setTimeout(()=>process.exit(0),1500));`;
+  const catalog=new InstalledModelCatalog(process.execPath,['-e',script],home);
+  t.after(async()=>{catalog.close();await catalog.cleanup;await rm(home,{recursive:true,force:true});});
+  assert.deepEqual(await catalog.get(),[{model:'fixture'}]);
+  const first=catalog.client;assert.ok(first);assert.equal(first.child.exitCode,null);
+  assert.deepEqual(await catalog.get(),[{model:'fixture'}]);assert.equal(catalog.client,first);
+  await writeFile(join(home,'config.toml'),'# changed configuration\n');
+  const refreshing=catalog.get();await catalog.cleanup;
+  assert.notEqual(first.child.exitCode,null);
+  assert.deepEqual(await refreshing,[{model:'fixture'}]);assert.notEqual(catalog.client,first);
 });
 
 for(const mode of ['available','unavailable','native-denied'])test(`bridge catalog compatibility: ${mode}`,async t=>{

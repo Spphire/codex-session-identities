@@ -34,6 +34,17 @@ try{
   assert.equal(await page.locator('#identity option').count(),2);
   assert.equal(await page.getByRole('button',{name:'移除 synthetic@example.com',exact:true}).isDisabled(),true);
   assert.match(await page.locator('#rows').innerText(),/synthetic@example.com/);
+  await page.evaluate(()=>{globalThis.fixtureRow=document.querySelector('#rows tr');});
+  await page.getByRole('button',{name:'刷新'}).click();
+  await page.waitForFunction(()=>!document.querySelector('#refresh').disabled);
+  assert.equal(await page.evaluate(()=>fixtureRow===document.querySelector('#rows tr')),true,'Refresh must retain unchanged rows');
+  const update=new DatabaseSync(join(home,'state_5.sqlite'));
+  update.prepare('UPDATE threads SET title=? WHERE id=?').run('Updated synthetic chat',id);update.close();
+  await page.getByRole('button',{name:'刷新'}).click();await page.waitForFunction(()=>document.querySelector('.session-title').textContent==='Updated synthetic chat');
+  assert.equal(await page.evaluate(()=>fixtureRow===document.querySelector('#rows tr')),true,'Updated rows must retain their selection target');
+  await page.locator('#search').fill('no-fixture-match');assert.equal(await page.locator('#rows tr').count(),0);
+  await page.locator('#search').fill('');assert.equal(await page.locator('#rows tr').count(),1);
+  assert.equal(await page.evaluate(()=>fixtureRow===document.querySelector('#rows tr')),true,'Filtered rows must be reusable');
   for(const [name,width,height] of [['desktop',1365,900],['mobile',390,844]]){
     await page.setViewportSize({width,height});
     await page.screenshot({path:join(output,`${name}.png`),fullPage:true});

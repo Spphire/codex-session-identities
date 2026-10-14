@@ -12,6 +12,7 @@ import {StdioClient} from '../stdio-client.mjs';
 import {readCatalog} from '../catalog.mjs';
 
 const [installation,apiId,reportPath,backendOverride,modelOverride]=process.argv.slice(2);
+const requestedModel=modelOverride||process.env.IDENTITY_TEST_MODEL;
 if(!installation||!apiId||!reportPath)throw new Error('Usage: node real-identity-routing-smoke.mjs <installation> <API-profile-id> <private-report>');
 const config=JSON.parse(await readFile(join(installation,'runtime-config.json'),'utf8'));
 const profileRoot=join(config.codexHome,'session-identities','profiles');
@@ -67,7 +68,7 @@ try{
   report.backendSha256=hash(await readFile(backendOverride?resolve(backendOverride):config.appServerExe));
   await client.initialize('real_identity_routing_verification');
   const catalog=(await client.call('model/list',{includeHidden:false})).data;
-  const model=(modelOverride?[modelOverride]:['gpt-6-luna','gpt-5.6-luna']).map(name=>catalog.find(x=>x.model===name)).find(Boolean);
+  const model=(requestedModel?[requestedModel]:['gpt-6-luna','gpt-5.6-luna']).map(name=>catalog.find(x=>x.model===name)).find(Boolean);
   assert.ok(model,'No lightweight Luna model in the installed catalog');report.model=model.model;
   const supported=model.supportedReasoningEfforts?.map(x=>x.reasoningEffort)||[];
   const effort=['none','minimal','low'].find(x=>supported.includes(x))||'low';report.effort=effort;

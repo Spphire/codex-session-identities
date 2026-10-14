@@ -7,6 +7,13 @@ export class SwitchCoordinator {
     const directory=join(codexDirectory,'session-identities');mkdirSync(directory,{recursive:true});
     this.store=new BindingStore(join(directory,'panel-bindings.sqlite'));this.bridge=bridge;this.inflight=new Set();this.closed=false;this.storeClosed=false;
     this.timer=setInterval(()=>this.tick(),2000);this.timer.unref();
+    this.eventTimer=null;
+    this.onLifecycle=()=>{
+      if(this.closed)return;
+      clearTimeout(this.eventTimer);
+      this.eventTimer=setTimeout(()=>void this.tick(),25);this.eventTimer.unref();
+    };
+    this.bridge.on?.('lifecycle',this.onLifecycle);
   }
 
   async submit(threadId,identityId,expectedRevision,expectedDesiredRevision) {
@@ -61,5 +68,5 @@ export class SwitchCoordinator {
   view(threadId){const state=this.store.read(threadId);return {...state,verified:state.verified&&this.bridge.status().connected&&state.runtimeId===`runtime-${this.bridge.status().pid}`,inflight:this.inflight.has(threadId)};}
 
   closeStore(){if(!this.storeClosed){this.storeClosed=true;this.store.close();}}
-  close(){this.closed=true;clearInterval(this.timer);if(!this.inflight.size)this.closeStore();}
+  close(){this.closed=true;clearInterval(this.timer);clearTimeout(this.eventTimer);this.bridge.removeListener?.('lifecycle',this.onLifecycle);if(!this.inflight.size)this.closeStore();}
 }

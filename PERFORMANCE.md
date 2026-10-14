@@ -1,8 +1,45 @@
 # Performance Assessment
 
-Measured on 2026-10-14 against Desktop `26.1007.2314.0`, original CLI `0.162.0-alpha.17.2`, Node `24.19.0` and patched backend SHA-256 `05c13eb605bdfa5fcb5f7f8d295034d6d546c31cb9916dd2a051bd54f6eaf7c4`. Local CPU: i9-14900K, 32 logical processors. Remote Windows CPU: i5-13600KF, 20 logical processors. Both existing Desktops remained running; test runtimes and chats were isolated.
+Measured on 2026-10-14 against Desktop `26.1007.2314.0`, original CLI `0.162.0-alpha.17.2` and Node `24.19.0`. The historical v0.1.2 backend SHA-256 is `05c13eb605bdfa5fcb5f7f8d295034d6d546c31cb9916dd2a051bd54f6eaf7c4`; the optimized v0.1.3 backend is `ae4a715f6493f909b49d046f8379ca42d2401384cf8ca14f89d6e99a8d74efaa`. Local CPU: i9-14900K, 32 logical processors. Remote Windows CPU: i5-13600KF, 20 logical processors. Existing Desktops remained running during measurements; runtimes and chats were isolated.
 
-## Conclusion
+## v0.1.3 Optimization
+
+The fourth source patch prepares model catalogs before acquiring the global mutation permit and stores each identity's catalog under its profile's `model-catalog` directory. Fresh reloads retain upstream provider/auth identity, client-version and 300-second TTL checks. A settings snapshot is rechecked alongside binding revision and runtime ownership before committing, so concurrent setting changes cause a retry. Commit/drain/rollback still use the original shared permit; this is not an unrestricted concurrent runtime replacement.
+
+The backend now uses a release build: optimization level 3, debug information disabled, LTO disabled and 16 codegen units, with the same Rust toolchain/static CRT/8 MiB stack. The bridge returns a fetched installed catalog before waiting for helper teardown, while serializing subsequent refreshes and retaining bounded timeout/invalidation handling. RPC client closure releases pipes that Windows descendants can inherit; an exited direct child must not retain the Node reader indefinitely.
+
+The coordinator retries queued switches after lifecycle notifications with a 25 ms debounce and keeps the 2-second timer as fallback. The panel checks a selected pending switch every 400 ms, reuses existing rows and one date formatter, and pauses browser polling when hidden. Full server-side catalog reads and initial row construction remain; no stale credential metadata cache was introduced.
+
+| Measurement | Local v0.1.2 | Local v0.1.3 | Remote v0.1.2 | Remote v0.1.3 |
+| --- | ---: | ---: | ---: | ---: |
+| Bridged native synthetic idle switch | 75.3 ms | 34.7 ms | 78.9 ms | 34.6 ms |
+| Coordinator-confirmed synthetic switch | 86.4 ms | 43.8 ms | 88.4 ms | 38.6 ms |
+| Busy switch, wait after releasing turn | 1066.6 ms | 84.8 ms | 1167.1 ms | 85.7 ms |
+| First installed model/list observation | 766.1 ms | 145.0 ms | 3151.9 ms | 146.5 ms |
+| 1,000-delta synthetic burst | 154.3 ms | 45.4 ms | 171.4 ms | 46.5 ms |
+| cmd command/exec median | 36.0 ms | 32.2 ms | 28.7 ms | 27.8 ms |
+| Backend working set after workload | 214.9 MiB | 96.5 MiB | 178.2 MiB | 94.1 MiB |
+
+These compare final test binaries, including build-profile differences; they are not patch-only CPU measurements. Startup still performs version probing and companion hashing: optimized bridged initialize medians were 376.8/389.7 ms local/remote. Browser/Node GC and cleanup timing vary; the bridge working sets were 50.1/83.7 MiB, so there is no claim that every sidecar process shrank.
+
+The same catalog-only, real two-official-account concurrency test on the remote host observed:
+
+| Real operation | v0.1.2 | v0.1.3 |
+| --- | ---: | ---: |
+| A -> B, B not yet cached | 4309.5 ms | 3887.5 ms |
+| B -> A, A previously cached | 3692.3 ms | 42.5 ms |
+| Other chat rename, maximum during A -> B | 4241.5 ms | 18.9 ms |
+| Other chat rename, maximum during B -> A | 3619.7 ms | 3.4 ms |
+
+The cold transition still waits for upstream catalog networking, but its 63 concurrent probe samples no longer showed a multi-second rename stall (rename median 3.6 ms, p95 5.9 ms). The warm transition completed within one probe sample; it does not establish warm-switch tail latency. Global login files retained their hashes.
+
+Isolated real A -> API -> distinct B -> A routing also passed with `gpt-5.6-luna`, low effort and standard tier: every reply was OK, with matching credentials/account headers and HTTP 200. Switch times were 3657.5, 2680.1, 3050.4 and 51.6 ms respectively; first use of each identity paid catalog costs, and the final official return reused its cache. Actual Get-Location/code-mode-host execution also passed. An initial `gpt-6-luna` attempt was rejected as at capacity by the upstream service; it was not counted as a passing turn or hidden by the adapter.
+
+Unchanged-row render/layout medians improved from 73.8 to 0.7 ms at 1200 rows and from 318.0 to 3.0 ms at 5000 rows. This measures repeated unchanged refreshes, not first paint or rebuilding a new dataset. Browser QA verified stable row identity across updates/filtering, guarded deletion and desktop/mobile layouts.
+
+Remaining limits: failed/stale/unwritable catalog caches can fall back to fresh networking during reload; slow MCP/runtime teardown and commit I/O can still extend the shared critical section. Histories, provider changes, entitlement changes and cache expiry still matter. No claim of zero contention or universally sub-second cold switching is made. The v0.1.2 assessment below is retained for historical comparison.
+
+## Historical v0.1.2 Conclusion
 
 The adapter has measurable startup and memory costs. Steady bridge overhead is small for the tested RPCs and shell commands. **Real official switches took several seconds and blocked another chat's rename for most of that interval.** This is shared-lock contention introduced by the switching path, not ordinary JSON forwarding overhead. Queued retries and UI polling add perceived delay. First model-catalog lookup is also noticeable, and the full panel list scales with chat count.
 

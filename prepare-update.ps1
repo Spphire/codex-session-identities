@@ -10,17 +10,13 @@ if($LASTEXITCODE -ne 0){throw 'Candidate checkout creation failed'}
 & git -C $Checkout sparse-checkout set codex-rs docs
 & git -C $Checkout -c core.longpaths=true checkout --detach HEAD
 if($LASTEXITCODE -ne 0){throw 'Candidate checkout failed'}
-$manifest=Get-Content (Join-Path $PSScriptRoot 'patches\manifest.json') -Raw -Encoding UTF8|ConvertFrom-Json
-$patchPaths=@($manifest.patches|ForEach-Object {Join-Path $PSScriptRoot ('patches\'+$_)})
-& git -C $Checkout apply --check @patchPaths
-if($LASTEXITCODE -ne 0){throw 'Upstream changed the integration points. Review this candidate; the installed runtime is unchanged.'}
-& git -C $Checkout apply @patchPaths
-if($LASTEXITCODE -ne 0){throw 'Candidate patch failed'}
+& powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'patches\apply.ps1') -Repository $Checkout
+if($LASTEXITCODE -ne 0){throw 'Patch preflight failed. Review the pinned upstream revision and integration points; the installed runtime is unchanged.'}
 if($Build){
     $env:CARGO_PROFILE_DEV_DEBUG='0';$env:CARGO_PROFILE_TEST_DEBUG='0';$env:CARGO_INCREMENTAL='0';$env:RUST_MIN_STACK='33554432'
     Push-Location (Join-Path $Checkout 'codex-rs')
     try{
-        & cargo build -p codex-app-server --bin codex-app-server
+        & cargo build --release -p codex-app-server --bin codex-app-server --no-default-features
         if($LASTEXITCODE -ne 0){throw 'Candidate build failed'}
         & cargo test -p codex-core --lib 'thread_manager::tests::' --no-default-features -- --test-threads=4
         if($LASTEXITCODE -ne 0){throw 'Candidate thread tests failed'}
@@ -28,7 +24,7 @@ if($Build){
         if($LASTEXITCODE -ne 0){throw 'Candidate authentication test failed'}
     }finally{Pop-Location}
     foreach($mode in @('legacy','paginated')){
-        & node (Join-Path $PSScriptRoot 'test\runtime-smoke.mjs') (Join-Path $Checkout 'codex-rs\target\debug\codex-app-server.exe') $mode
+        & node (Join-Path $PSScriptRoot 'test\runtime-smoke.mjs') (Join-Path $Checkout 'codex-rs\target\release\codex-app-server.exe') $mode
         if($LASTEXITCODE -ne 0){throw 'Candidate native routing smoke failed'}
     }
 }

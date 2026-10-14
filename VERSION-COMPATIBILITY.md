@@ -2,13 +2,13 @@
 
 ## Policy
 
-The identity adapter must report the actual installed original Codex CLI version consistently to Desktop and official services. It must not expose the patched source build's `0.0.0` as the installed product version, hard-code an invented newer version, or replace Desktop installation files. The adapter's own release number (`0.1.2`) remains separate.
+The identity adapter must report the actual installed original Codex CLI version consistently to Desktop and official services. It must not expose the patched source build's `0.0.0` as the installed product version, hard-code an invented newer version, or replace Desktop installation files. The adapter's own release number (`0.1.3`) remains separate.
 
 The validated combination is Windows Desktop `26.1007.2314.0`, installed CLI `0.162.0-alpha.17.2`, upstream commit `0c7362d121d1c7f69540262425fd4e2209fd8e8d`, and Rust `1.95.0`. Matching version fields is necessary on this baseline; it does not prove that the patched implementation supports a future Desktop protocol or feature.
 
 ## Covered Paths
 
-At app-server startup, `runtime-bridge.cjs` runs the configured original CLI's `--version`. Only a successful, validated `codex-cli <version>` result supplies `CODEX_IDENTITY_CLIENT_VERSION`. The three replayable patches cover:
+At app-server startup, `runtime-bridge.cjs` runs the configured original CLI's `--version`. Only a successful, validated `codex-cli <version>` result supplies `CODEX_IDENTITY_CLIENT_VERSION`. The version patches cover the paths below; the fourth performance patch retains these checks and the upstream model cache's identity/version/TTL validation:
 
 | Path | Alignment mechanism | Reason |
 | --- | --- | --- |

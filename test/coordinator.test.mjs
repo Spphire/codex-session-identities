@@ -4,11 +4,13 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { SwitchCoordinator } from '../switch-coordinator.mjs';
+import {EventEmitter} from 'node:events';
 
 function setup(t){
   const directory=mkdtempSync(join(tmpdir(),'identity-coordinator-'));
   const states=new Map();const busy=new Set();const writes=[];const coordinators=[];
-  const bridge={status:()=>({connected:true,pid:42}),connect:async()=>({connected:true,pid:42}),call:async(method,params)=>{
+  const events=new EventEmitter();
+  const bridge={on:events.on.bind(events),removeListener:events.removeListener.bind(events),status:()=>({connected:true,pid:42}),connect:async()=>({connected:true,pid:42}),call:async(method,params)=>{
     const state=states.get(params.threadId)||{threadId:params.threadId,identityId:null,revision:0,verified:false,status:'unbound'};
     if(method==='thread/identity/read')return {...state};
     if(method==='thread/resume'){
@@ -23,7 +25,7 @@ function setup(t){
     throw new Error('Unexpected RPC');
   }};
   t.after(async()=>{for(const item of coordinators)item.close();await new Promise(r=>setImmediate(r));rmSync(directory,{recursive:true,force:true});});
-  return {states,busy,writes,create(){const coordinator=new SwitchCoordinator(directory,bridge);clearInterval(coordinator.timer);coordinators.push(coordinator);return coordinator;}};
+  return {states,busy,writes,events,create(){const coordinator=new SwitchCoordinator(directory,bridge);clearInterval(coordinator.timer);coordinators.push(coordinator);return coordinator;}};
 }
 async function settled(coordinator){for(let i=0;i<20;i++){await new Promise(r=>setImmediate(r));if(!coordinator.inflight.size)return;}throw new Error('Coordinator did not settle');}
 
@@ -36,6 +38,18 @@ test('busy identity change stays pending while a sibling switches, then applies 
   fixture.busy.delete('one');await coordinator.tick();
   assert.equal(coordinator.store.read('one').appliedIdentityId,'api_a');
   assert.equal(fixture.writes.length,2);
+});
+
+test('idle lifecycle retries a busy switch without waiting for the fallback interval',async t=>{
+  const fixture=setup(t);fixture.busy.add('one');const coordinator=fixture.create();
+  await coordinator.submit('one','api_a',0,0);await settled(coordinator);
+  assert.equal(coordinator.view('one').pending,true);
+  fixture.busy.clear();fixture.events.emit('lifecycle',{method:'turn/completed'});
+  for(const deadline=Date.now()+1000;coordinator.view('one').pending;){
+    assert.ok(Date.now()<deadline,'Lifecycle retry did not apply');await new Promise(r=>setTimeout(r,10));
+  }
+  assert.equal(coordinator.view('one').verified,true);assert.equal(fixture.writes.length,1);
+  coordinator.close();assert.equal(fixture.events.listenerCount('lifecycle'),0);
 });
 
 test('pending switch survives panel restart without changing its target or expected native revision',async t=>{

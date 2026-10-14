@@ -29,7 +29,7 @@ function mergePage(native, original, params={}) {
 }
 
 class InstalledModelCatalog {
-  constructor(executable,args,home){this.executable=executable;this.args=args;this.home=home;this.cached=null;this.pending=null;this.client=null;this.closed=false;}
+  constructor(executable,args,home){this.executable=executable;this.args=args;this.home=home;this.cached=null;this.pending=null;this.client=null;this.cleanup=null;this.closed=false;}
   async get(){
     if(this.closed)return null;
     const files=[this.executable,path.join(this.home,'config.toml'),path.join(this.home,'auth.json')];
@@ -42,6 +42,9 @@ class InstalledModelCatalog {
     return this.pending;
   }
   async fetch(){
+    // Return a valid catalog without making Desktop wait for helper teardown.
+    // Serialize a later refresh with cleanup so only one helper exists at a time.
+    await this.cleanup;
     const {StdioClient}=await import('./stdio-client.mjs');
     if(this.closed)return null;
     const client=new StdioClient(this.executable,this.args,{env:{...process.env,CODEX_HOME:this.home}});
@@ -59,7 +62,9 @@ class InstalledModelCatalog {
       return models;
     }finally{
       // Retain the deadline while closing an unresponsive helper process.
-      await client.close();clearTimeout(deadline);if(this.client===client)this.client=null;
+      this.cleanup=client.close().catch(()=>client.child.kill()).finally(()=>{
+        clearTimeout(deadline);if(this.client===client)this.client=null;
+      });
     }
   }
   close(){this.closed=true;this.client?.child.kill();}

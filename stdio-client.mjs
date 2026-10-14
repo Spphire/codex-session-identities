@@ -8,7 +8,7 @@ export class StdioClient {
     this.child=spawn(executable,args,{...options,windowsHide:true,stdio:['pipe','pipe','ignore']});
     const fail=()=>{this.closed=true;for(const request of this.pending.values()){clearTimeout(request.timer);request.reject(new Error('Codex RPC process stopped'));}this.pending.clear();};
     this.child.on('error',fail);this.child.on('exit',fail);this.child.stdin.on('error',fail);
-    createInterface({input:this.child.stdout}).on('line',line=>{
+    this.lines=createInterface({input:this.child.stdout});this.lines.on('line',line=>{
       let message;try{message=JSON.parse(line);}catch{return;}
       const request=this.pending.get(message.id);
       if(!request){this.events.push(message);return;}
@@ -28,7 +28,14 @@ export class StdioClient {
     this.child.stdin.write('{"method":"initialized","params":{}}\n');
   }
   async close(){
-    this.child.stdin.end();if(this.child.exitCode!==null||this.child.signalCode!==null)return;
-    const killer=setTimeout(()=>this.child.kill(),10000);await once(this.child,'exit');clearTimeout(killer);
+    let killer;
+    try{
+      this.child.stdin.end();if(this.child.exitCode!==null||this.child.signalCode!==null)return;
+      killer=setTimeout(()=>this.child.kill(),10000);await once(this.child,'exit');
+    }finally{
+      clearTimeout(killer);
+      // Windows descendants can retain inherited pipes after the direct child exits.
+      this.lines.close();this.child.stdin.destroy();this.child.stdout.destroy();
+    }
   }
 }

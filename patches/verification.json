@@ -3,13 +3,15 @@
   "testedDesktop": "26.1007.2314.0",
   "originalCli": "0.162.0-alpha.17.2",
   "nodeTests": {
-    "passed": 37,
+    "passed": 42,
     "failed": 0
   },
   "rustTests": {
-    "threadManagerPassed": 44,
+    "threadManagerPassed": 45,
     "officialIdentityFencePassed": 1
   },
   "scope": "Experimental Windows release on the pinned baseline. Raw private-account reports are not distributed.",
-  "backendSha256": "05C13EB605BDFA5FCB5F7F8D295034D6D546C31CB9916DD2A051BD54F6EAF7C4"
+  "backendSha256": "AE4A715F6493F909B49D046F8379CA42D2401384CF8CA14F89D6E99A8D74EFAA",
+  "buildProfile": {"profile":"release","optLevel":3,"debug":0,"lto":false,"codegenUnits":16},
+  "performanceReport": "../PERFORMANCE.md"
 }
