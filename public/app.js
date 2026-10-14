@@ -7,7 +7,8 @@ let selected = null;
 let refreshing = false;
 let identityDetail = null;
 let submitting = false;
-const identityName=id=>state?.identities.find(x=>x.runtimeId===id)?.name || id || '未固定身份';
+let deleting=false;
+const identityName=id=>state?.identities.find(x=>x.runtimeIds?.includes(id)||x.runtimeId===id)?.name || id || '未固定身份';
 const rowIdentity=row=>row.identityState==='verified'?identityName(row.identityId):row.identityId?identityName(row.identityId)+'（待核验）':'未固定身份';
 const date = seconds => new Date(seconds * 1000).toLocaleString('zh-CN', { month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit' });
 function element(tag, text, className) { const e=document.createElement(tag); e.textContent=text; if(className)e.className=className; return e; }
@@ -38,7 +39,7 @@ function renderRows() {
   }
 }
 async function refresh(){
-  if(refreshing)return; refreshing=true; $('refresh').disabled=true;
+  if(refreshing||deleting)return; refreshing=true; $('refresh').disabled=true;
   try{
     const response=await apiFetch('/api/state'); const next=await response.json(); if(!response.ok)throw new Error(next.error);
     state=next; $('error').hidden=true; $('connection').textContent=state.runtime.connected?'身份后端已连接':state.runtime.reason;
@@ -46,14 +47,33 @@ async function refresh(){
     for(const provider of [...new Set(state.sessions.map(x=>x.provider))].sort())$('provider').add(new Option(provider,provider)); $('provider').value=old;
     const oldIdentity=$('identity').value; $('identity').replaceChildren(); $('identities').replaceChildren();
     for(const identity of state.identities){
-      const option=new Option(identity.name+(identity.runtimeId?'':'（待导入）'),identity.runtimeId||'');option.disabled=!identity.runtimeId;$('identity').add(option);
-      const li=element('li',identity.name); li.append(element('small',identity.kind==='chatgpt'?'ChatGPT 官方账号':`API · ${identity.provider}`)); $('identities').append(li);
+      if(identity.removed)continue;
+      const option=new Option(identity.name+(!identity.runtimeId?'（待导入）':!identity.available?'（登录不匹配或已失效）':''),identity.runtimeId||'');option.disabled=!identity.available;$('identity').add(option);
+      const li=element('li','');const text=element('div','');text.append(element('span',identity.name));
+      const sources=(identity.sources||[]).map(x=>x==='system'?'本体登录':'独立登录').join(' / ');
+      text.append(element('small',identity.kind==='chatgpt'?`${sources||'ChatGPT 官方账号'}${identity.runtimeIds?.length>1?` · ${identity.runtimeIds.length} 份档案`:''}${identity.runtimeId&&!identity.available?' · 登录不匹配或已失效':''}`:`API · ${identity.provider}`));
+      const used=state.sessions.some(x=>identity.runtimeIds.includes(x.identityId)||x.queue?.pending&&identity.runtimeIds.includes(x.queue.desiredIdentityId));
+      const remove=element('button','\u2212','remove-identity');remove.type='button';remove.setAttribute('aria-label',`移除 ${identity.name}`);
+      remove.title=used?'仍有会话使用，请先切换这些会话':'从面板移除（保留登录凭据）';remove.disabled=used;
+      remove.addEventListener('click',()=>removeIdentity(identity));li.append(text,remove);$('identities').append(li);
     }
-    if(oldIdentity && state.identities.some(x=>x.runtimeId===oldIdentity))$('identity').value=oldIdentity;
+    const previous=state.identities.find(x=>!x.removed&&x.available&&x.runtimeIds.includes(oldIdentity));
+    if(previous)$('identity').value=previous.runtimeId;
+    else $('identity').value=state.identities.find(x=>!x.removed&&x.available)?.runtimeId||'';
     $('updated').textContent=`更新于 ${new Date(state.observedAt).toLocaleTimeString('zh-CN')}`;
     renderRows();renderDetail();await loadIdentity();
   }catch(error){$('error').textContent=error.message; $('error').hidden=false; $('connection').textContent='连接失败';}
   finally{refreshing=false;$('refresh').disabled=false;}
+}
+async function removeIdentity(identity){
+  if(deleting||!confirm(`从面板移除“${identity.name}”${identity.memberIds.length>1?`的 ${identity.memberIds.length} 份档案`:''}？\n登录凭据会保留，不会注销账号。`))return;
+  deleting=true;
+  try{
+    const response=await apiFetch('/api/identities/remove',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({identityId:identity.id,expectedMemberIds:identity.memberIds})});
+    const value=await response.json();if(!response.ok)throw new Error(value.error);
+  }catch(error){$('error').textContent=error.message;$('error').hidden=false;return;}
+  finally{deleting=false;}
+  await refresh();
 }
 async function loadIdentity(){
   const id=selected;if(!id||!state?.runtime.connected)return;

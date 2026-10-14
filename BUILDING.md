@@ -32,6 +32,8 @@ node test/runtime-smoke.mjs upstream/codex-rs/target/release/codex-app-server.ex
 
 `build-native.ps1` uses `rustc` from PATH; select Rust 1.95.0 before running it. Native launcher integration tests under `test/` use isolated fixture processes rather than restarting the production Desktop. Read their parameters before running them.
 
+Optional panel UI QA: install Playwright locally (not a runtime dependency), ensure Microsoft Edge is present, then run `node test/panel-ui-smoke.mjs <screenshot-directory>`. It uses only synthetic identities and checks duplicate grouping, guarded removal and desktop/mobile layouts. `PLAYWRIGHT_MODULE` can instead point to an existing Playwright entrypoint.
+
 ## Package
 
 ```powershell

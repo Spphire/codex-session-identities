@@ -5,6 +5,7 @@ import { homedir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { readCatalog } from './catalog.mjs';
+import {removeIdentity} from './identity-management.mjs';
 import { BridgeClient } from './bridge-client.mjs';
 import { SwitchCoordinator } from './switch-coordinator.mjs';
 import { existsSync } from 'node:fs';
@@ -14,6 +15,8 @@ export function panelServer({ codexDirectory, switcherDirectory, accessToken=ran
   const bridge = new BridgeClient(codexDirectory);
   let coordinator=existsSync(join(codexDirectory,'session-identities','panel-bindings.sqlite'))?new SwitchCoordinator(codexDirectory,bridge):null;
   const observed=new Map();
+  let writes=Promise.resolve();
+  const exclusive=operation=>{const next=writes.then(operation);writes=next.catch(()=>{});return next;};
   const files = new Map([
     ['/', ['index.html', 'text/html; charset=utf-8']],
     ['/app.js', ['app.js', 'text/javascript; charset=utf-8']],
@@ -33,6 +36,16 @@ export function panelServer({ codexDirectory, switcherDirectory, accessToken=ran
       if(supplied.length!==expected.length||!timingSafeEqual(supplied,expected)){json(401,{error:'面板访问未授权'});return;}
     }
     try {
+      if(req.method==='POST'&&req.url==='/api/identities/remove'){
+        if(req.headers.origin!==`http://${host}`||!req.headers['content-type']?.startsWith('application/json')){json(403,{error:'仅接受面板内操作'});return;}
+        let body='';for await(const chunk of req){body+=chunk;if(Buffer.byteLength(body)>4096){json(413,{error:'请求过大'});return;}}
+        const input=JSON.parse(body);
+        try{
+          const result=await exclusive(()=>removeIdentity(codexDirectory,readCatalog(codexDirectory,switcherDirectory),input,coordinator?.store.pendingRequests()||[],[...observed.values()].map(x=>x.identity)));
+          json(200,result);
+        }catch(error){json(409,{error:error.message});}
+        return;
+      }
       if (req.method==='POST' && ['/api/switch','/api/cancel'].includes(req.url)) {
         if(req.headers.origin!==`http://${host}` || !req.headers['content-type']?.startsWith('application/json')){json(403,{error:'仅接受面板内操作'});return;}
         if(!(await bridge.connect()).connected){json(503,{error:'运行时桥接未接入，未更改任何会话身份。'});return;}
@@ -41,9 +54,11 @@ export function panelServer({ codexDirectory, switcherDirectory, accessToken=ran
         if(!/^[a-f0-9-]{36}$/.test(input.threadId||'') || !Number.isSafeInteger(input.expectedDesiredRevision) || input.expectedDesiredRevision<0){json(400,{error:'无效的会话或版本'});return;}
         coordinator??=new SwitchCoordinator(codexDirectory,bridge);
         if(req.url==='/api/cancel'){json(200,coordinator.cancel(input.threadId,input.expectedDesiredRevision));return;}
-        const catalog=readCatalog(codexDirectory,switcherDirectory);
-        if(!catalog.sessions.some(x=>x.id===input.threadId) || !catalog.identities.some(x=>x.runtimeId===input.identityId)){json(400,{error:'会话或已导入身份不存在'});return;}
-        const result=await coordinator.submit(input.threadId,input.identityId,input.expectedRevision,input.expectedDesiredRevision);
+        const result=await exclusive(async()=>{
+          const catalog=readCatalog(codexDirectory,switcherDirectory);
+          if(!catalog.sessions.some(x=>x.id===input.threadId)||!catalog.identities.some(x=>x.runtimeId===input.identityId&&x.available&&!x.removed))throw new Error('会话或可用身份不存在，请刷新');
+          return coordinator.submit(input.threadId,input.identityId,input.expectedRevision,input.expectedDesiredRevision);
+        });
         json(202,result);return;
       }
       if (req.method !== 'GET') {

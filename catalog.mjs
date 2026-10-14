@@ -1,13 +1,14 @@
 import { DatabaseSync } from 'node:sqlite';
 import { readFileSync, existsSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
+import {removedIdentities} from './identity-management.mjs';
 
 function metadata(path) {
   try { return JSON.parse(readFileSync(path, 'utf8')); }
   catch (error) { if (error.code === 'ENOENT') return {}; throw error; }
 }
 
-function officialEmail(codexDirectory, profileDirectory, profile) {
+function officialAccount(codexDirectory, profileDirectory, profile) {
   try {
     const auth=metadata(join(profile.kind==='chatgpt-system'?codexDirectory:profileDirectory,'auth.json'));
     if(auth.auth_mode!=='chatgpt'||typeof auth.tokens?.id_token!=='string')return null;
@@ -15,14 +16,14 @@ function officialEmail(codexDirectory, profileDirectory, profile) {
     const info=claims['https://api.openai.com/auth'];
     const userId=info?.chatgpt_user_id||info?.user_id;
     if(!profile.accountId||!profile.userId||auth.tokens.account_id!==profile.accountId||userId!==profile.userId)return null;
-    return typeof claims.email==='string' && /^[^\s@]+@[^\s@]+$/.test(claims.email)?claims.email:null;
+    return {key:JSON.stringify([profile.accountId,profile.userId]),email:typeof claims.email==='string' && /^[^\s@]+@[^\s@]+$/.test(claims.email)?claims.email:null};
   }catch{return null;}
 }
 
 export function readCatalog(codexDirectory, switcherDirectory) {
   const saved = metadata(join(switcherDirectory, 'state.json'));
   // Use an explicit allowlist: this file can contain credentials in nested baselines.
-  const identities = [
+  let identities = [
     ...(saved.identities ?? []).map(x => ({ id: `api:${x.id}`, name: String(x.name), kind: 'api', provider: String(x.providerId) })),
     ...(saved.officialAccounts ?? []).map(x => ({ id: `chatgpt:${x.id}`, name: String(x.name), kind: 'chatgpt', provider: 'openai' })),
   ];
@@ -39,12 +40,31 @@ export function readCatalog(codexDirectory, switcherDirectory) {
     identities.push({id:item.name,runtimeId:item.name,name:typeof label.name==='string'?label.name:item.name,kind:profile.kind.startsWith('chatgpt')?'chatgpt':'api',provider:String(profile.providerId)});
   }
   const bindingRoot=join(codexDirectory,'session-identities','bindings');const bindings=new Map();
+  const removed=new Set(removedIdentities(codexDirectory));const groups=new Map();const grouped=[];
   for(const identity of identities){
-    if(identity.kind!=='chatgpt'||!identity.runtimeId)continue;
-    const directory=join(profileRoot,identity.runtimeId);
-    const email=officialEmail(codexDirectory,directory,metadata(join(directory,'profile.json')));
-    if(email)identity.name=email;
+    identity.memberIds=[identity.id];identity.runtimeIds=identity.runtimeId?[identity.runtimeId]:[];
+    identity.removed=removed.has(identity.id);identity.available=Boolean(identity.runtimeId);identity.sources=[];
+    if(identity.kind==='chatgpt'&&identity.runtimeId){
+      const directory=join(profileRoot,identity.runtimeId);const profile=metadata(join(directory,'profile.json'));
+      const account=officialAccount(codexDirectory,directory,profile);
+      identity.sources=[profile.kind==='chatgpt-system'?'system':'independent'];
+      identity.available=Boolean(account);
+      if(account?.email)identity.name=account.email;
+      // Only verified account + user metadata can merge official profiles. Email alone is not proof.
+      if(account&&!identity.removed){
+        const existing=groups.get(account.key);
+        if(existing){
+          existing.memberIds.push(...identity.memberIds);existing.runtimeIds.push(...identity.runtimeIds);
+          existing.sources=[...new Set([...existing.sources,...identity.sources])];
+          if(profile.kind==='chatgpt-system'){existing.id=identity.id;existing.runtimeId=identity.runtimeId;existing.provider=identity.provider;}
+          continue;
+        }
+        groups.set(account.key,identity);
+      }
+    }
+    grouped.push(identity);
   }
+  identities=grouped;
   if(existsSync(bindingRoot))for(const name of readdirSync(bindingRoot)){
     if(!/^[a-f0-9-]{36}\.json$/.test(name))continue;
     const binding=metadata(join(bindingRoot,name));

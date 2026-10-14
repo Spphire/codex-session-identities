@@ -9,6 +9,7 @@ target/
 runtime-config.json
 launcher-status.json
 panel-window-status.json
+panel-identities.json
 auth.json
 .env
 .env.*

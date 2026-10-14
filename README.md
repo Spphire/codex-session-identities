@@ -16,6 +16,7 @@ See [USER-GUIDE.md](USER-GUIDE.md) for installation, identity registration, swit
 - Busy switches wait until idle; saved and runtime-confirmed bindings are distinguished.
 - Account/user fencing, sibling isolation, cold-chat binding and child/fork inheritance.
 - Official identities display the matching account email when available.
+- Duplicate official profiles are grouped by verified account/user, and unused identities can be removed from the panel without deleting credentials.
 - Authenticated loopback panel, single-instance tray and reusable dedicated Edge/Chrome panel window.
 - Restart launcher, installed-model catalog compatibility and execution-host synchronization.
 

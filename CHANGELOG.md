@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.1 - 2026-10-14
+
+- Merge duplicate official profiles by verified account and user IDs, retaining existing binding aliases. Never merge by email alone.
+- Mark fixed system identities unavailable after the host account changes, without relabeling them as the new account.
+- Add confirmed panel removal of unused identities. Keep credentials and profiles intact; reject bound, queued, observed or stale selections.
+- Add six identity-management tests and optional synthetic desktop/mobile browser QA.
+
 ## 0.1.0 - 2026-10-14
 
 First public experimental Windows release.

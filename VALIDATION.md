@@ -4,7 +4,8 @@ Baseline: Windows Desktop `26.1007.2314.0`, original CLI `0.162.0-alpha.17.2`, R
 
 The following checks were performed during development. Raw real-account reports remain private because they include machine, identity and chat metadata. These are historical checks on the stated baseline, not guarantees for newer Desktop builds.
 
-- 27 Node unit/integration tests passed, covering authenticated bridge routing, data minimization, origin/host checks, identity isolation, queued and cancelled switches, offline bindings, model catalog and desktop-runtime discovery.
+- 33 Node unit/integration tests passed, covering authenticated bridge routing, data minimization, origin/host checks, identity isolation, queued and cancelled switches, offline bindings, model catalog, desktop-runtime discovery, duplicate grouping and guarded removal.
+- Synthetic Edge browser QA passed on desktop/mobile: grouping and alias labels, bound-removal disabled, unused-removal confirmation/persistence, no JavaScript errors and no identity-text/button overlap.
 - Rust validation previously passed 44 thread-manager tests and one official account/user fencing test.
 - Synthetic DPAPI checks covered import, refresh synchronization and refusal of concurrent vault changes.
 - Native routing smoke tests covered legacy/paginated histories, busy refusal, sibling progress, instruction retention, fork inheritance, cold resume and unavailable-identity replacement.
