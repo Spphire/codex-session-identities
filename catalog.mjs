@@ -48,6 +48,7 @@ export function readCatalog(codexDirectory, switcherDirectory) {
       const directory=join(profileRoot,identity.runtimeId);const profile=metadata(join(directory,'profile.json'));
       const account=officialAccount(codexDirectory,directory,profile);
       identity.sources=[profile.kind==='chatgpt-system'?'system':'independent'];
+      identity.reauthRuntimeId=profile.kind==='chatgpt'?identity.runtimeId:null;
       identity.available=Boolean(account);
       if(account?.email)identity.name=account.email;
       // Only verified account + user metadata can merge official profiles. Email alone is not proof.
@@ -56,6 +57,7 @@ export function readCatalog(codexDirectory, switcherDirectory) {
         if(existing){
           existing.memberIds.push(...identity.memberIds);existing.runtimeIds.push(...identity.runtimeIds);
           existing.sources=[...new Set([...existing.sources,...identity.sources])];
+          if(!existing.reauthRuntimeId&&identity.reauthRuntimeId)existing.reauthRuntimeId=identity.reauthRuntimeId;
           if(profile.kind==='chatgpt-system'){existing.id=identity.id;existing.runtimeId=identity.runtimeId;existing.provider=identity.provider;}
           continue;
         }

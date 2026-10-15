@@ -5,7 +5,7 @@ import {request,Agent} from 'node:https';
 
 const safeText=value=>typeof value==='string'?value.slice(0,100):null;
 const failure=code=>Object.assign(new Error('Official usage unavailable'),{code});
-const messages={login_expired:'登录已过期，使用该身份或重新登录后重试',account_mismatch:'账号不匹配，未显示额度',rate_limited:'查询频繁，稍后自动重试',network:'额度查询失败，稍后自动重试',invalid_response:'官方未返回有效额度数据'};
+const messages={login_expired:'登录凭据已失效，请点击“重新登录”并使用原账号授权',account_mismatch:'账号不匹配，未显示额度',rate_limited:'查询频繁，稍后自动重试',network:'额度查询失败，稍后自动重试',invalid_response:'官方未返回有效额度数据'};
 
 function credentials(home,id){
   if(!/^[A-Za-z0-9_-]{1,100}$/.test(id||''))return null;

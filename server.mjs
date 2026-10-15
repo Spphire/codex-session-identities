@@ -56,6 +56,13 @@ export function panelServer({ codexDirectory, switcherDirectory, originalCodexEx
         }catch(error){json(409,{error:error.message});}
         return;
       }
+      if(req.method==='POST'&&req.url==='/api/official-login/refresh'){
+        if(req.headers.origin!==`http://${host}`||!req.headers['content-type']?.startsWith('application/json')){json(403,{error:'仅接受面板内操作'});return;}
+        let body='';for await(const chunk of req){body+=chunk;if(Buffer.byteLength(body)>4096){json(413,{error:'请求过大'});return;}}
+        const input=JSON.parse(body);const catalog=readCatalog(codexDirectory,switcherDirectory);const identity=catalog.identities.find(x=>x.kind==='chatgpt'&&x.reauthRuntimeId===input.runtimeId&&!x.removed);
+        if(!identity||!identity.available){json(409,{error:'官方身份不可用，请刷新面板后重试'});return;}
+        json(200,await exclusive(()=>login.startRefresh(identity.reauthRuntimeId)));return;
+      }
       if (req.method==='POST' && ['/api/switch','/api/cancel'].includes(req.url)) {
         if(req.headers.origin!==`http://${host}` || !req.headers['content-type']?.startsWith('application/json')){json(403,{error:'仅接受面板内操作'});return;}
         if(!(await bridge.connect()).connected){json(503,{error:'运行时桥接未接入，未更改任何会话身份。'});return;}

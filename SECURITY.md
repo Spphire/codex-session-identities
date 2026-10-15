@@ -8,6 +8,7 @@ This sidecar manages sensitive model-provider credentials. It is intended for a 
 - A process running as the same Windows user can access local credentials. Loopback authentication and DPAPI are not isolation against malware or an administrator.
 - Identity switching affects model-provider requests, not the Desktop's third-party connector accounts, existing external terminal jobs or service-provider permissions.
 - Official quota reads use each verified profile's access token and account header, with account/user checks before and after the response. The HTTPS destination is fixed to `chatgpt.com/backend-api/wham/usage`; redirects are not followed. Only normalized allowances, reset times and Credits status reach the authenticated browser. Refresh tokens and login files are never modified by quota queries.
+- Re-login uses an isolated original-CLI device-code process. The returned account/user claims must match the existing private profile before its credential file is atomically replaced; a system login profile cannot be overwritten by this panel action.
 
 Do not put credentials, email lists, session databases, access descriptors, personal rollout histories or account screenshots in an issue or pull request. The public repository includes only synthetic test fixtures and summarized validation.
 

@@ -17,6 +17,7 @@ See [USER-GUIDE.md](USER-GUIDE.md) for installation, identity registration, swit
 - Account/user fencing, sibling isolation, cold-chat binding and child/fork inheritance.
 - Official identities display the matching account email when available.
 - Per-official-account remaining allowances, reset times and Credits balance in the identity sidebar, queried independently without changing the host login.
+- Persistent private official profiles with native automatic token refresh; a per-account re-login action repairs a provider-revoked refresh token without changing session bindings.
 - Duplicate official profiles are grouped by verified account/user, and unused identities can be removed from the panel without deleting credentials.
 - Authenticated loopback panel, single-instance tray and reusable dedicated Edge/Chrome panel window.
 - Restart launcher, installed-model catalog compatibility and execution-host synchronization.

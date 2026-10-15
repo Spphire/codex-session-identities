@@ -36,6 +36,7 @@ try{
   assert.match(await page.locator('.official-usage').innerText(),/59% 剩余/);
   assert.equal(await page.locator('meter').count(),2);
   assert.equal(await page.locator('.official-usage').count(),1,'API rows must not show official account quotas');
+  assert.equal(await page.getByRole('button',{name:'重新登录',exact:true}).count(),1);
   assert.equal(await page.locator('#identity option').count(),2);
   assert.equal(await page.getByRole('button',{name:'移除 synthetic@example.com',exact:true}).isDisabled(),true);
   assert.match(await page.locator('#rows').innerText(),/synthetic@example.com/);

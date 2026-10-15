@@ -9,6 +9,7 @@ let identityDetail = null;
 let submitting = false;
 let deleting=false;
 let identityPollTimer=null;
+let loginPollTimer=null;
 const rowCache=new Map();
 let officialUsage={};let usageRefreshing=false;let usageNextAt=0;let usageTimer=null;
 const dateFormatter=new Intl.DateTimeFormat('zh-CN',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'});
@@ -123,6 +124,9 @@ async function refresh(){
       const sources=(identity.sources||[]).map(x=>x==='system'?'本体登录':'独立登录').join(' / ');
       text.append(element('small',identity.kind==='chatgpt'?`${sources||'ChatGPT 官方账号'}${identity.runtimeIds?.length>1?` · ${identity.runtimeIds.length} 份档案`:''}${identity.runtimeId&&!identity.available?' · 登录不匹配或已失效':''}`:`API · ${identity.provider}`));
       if(identity.kind==='chatgpt')text.append(element('div','','official-usage'));
+      if(identity.kind==='chatgpt'&&identity.reauthRuntimeId){
+        const reauth=element('button','重新登录','reauth-identity');reauth.type='button';reauth.dataset.runtimeId=identity.reauthRuntimeId;reauth.title='令牌被撤销或失效时，重新授权此官方账号';reauth.addEventListener('click',()=>reauthIdentity(identity));text.append(reauth);
+      }
       const used=state.sessions.some(x=>identity.runtimeIds.includes(x.identityId)||x.queue?.pending&&identity.runtimeIds.includes(x.queue.desiredIdentityId));
       const remove=element('button','\u2212','remove-identity');remove.type='button';remove.setAttribute('aria-label',`移除 ${identity.name}`);
       remove.title=used?'仍有会话使用，请先切换这些会话':'从面板移除（保留登录凭据）';remove.disabled=used;
@@ -139,24 +143,31 @@ async function refresh(){
   }catch(error){$('error').textContent=error.message; $('error').hidden=false; $('connection').textContent='连接失败';}
   finally{refreshing=false;$('refresh').disabled=false;}
 }
-async function loginStatus(){
+async function loginStatus(reloadOnComplete=false){
   const response=await apiFetch('/api/official-login');const value=await response.json();if(!response.ok)throw new Error(value.error);
   const busy=['starting','waiting'].includes(value.status);$('add-official').disabled=busy;
   $('official-login').hidden=value.status==='idle';$('cancel-login').hidden=!busy;
   $('login-code').textContent=value.userCode||'';$('login-code').hidden=!value.userCode;
   $('login-url').hidden=!value.verificationUrl;
   if(value.verificationUrl)$('login-url').href=value.verificationUrl;
-  $('login-status').textContent=value.status==='waiting'?'使用要添加的官方账号授权':value.status==='completed'?`已添加 ${value.name}`:value.error||({starting:'正在申请设备码',cancelled:'已取消登录',expired:'设备码已过期，请重试'}[value.status]||'');
+  $('login-status').textContent=value.status==='waiting'?(value.kind==='refresh'?'使用原账号授权以恢复此身份':'使用要添加的官方账号授权'):value.status==='completed'?(value.kind==='refresh'?`已恢复 ${value.name}，原会话绑定保留`:`已添加 ${value.name}`):value.error||({starting:'正在申请设备码',cancelled:'已取消登录',expired:'设备码已过期，请重试',account_mismatch:'登录账号不匹配，凭据未替换'}[value.status]||'');
+  for(const button of document.querySelectorAll('.reauth-identity')){const active=busy&&button.dataset.runtimeId===value.targetRuntimeId;button.disabled=busy;button.textContent=active?'登录中…':'重新登录';}
+  clearTimeout(loginPollTimer);if(busy)loginPollTimer=setTimeout(()=>void loginStatus(reloadOnComplete).catch(()=>{}),1000);else if(reloadOnComplete&&value.status==='completed')void refresh();
 }
 async function officialLogin(cancel=false){
   $('add-official').disabled=true;$('cancel-login').disabled=true;
   try{
     const response=await apiFetch(cancel?'/api/official-login/cancel':'/api/official-login/start',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});
-    const value=await response.json();if(!response.ok)throw new Error(value.error);await loginStatus();
+    const value=await response.json();if(!response.ok)throw new Error(value.error);await loginStatus(true);
   }catch(error){$('error').textContent=error.message;$('error').hidden=false;$('add-official').disabled=false;}
   finally{$('cancel-login').disabled=false;}
 }
 $('add-official').addEventListener('click',()=>officialLogin());$('cancel-login').addEventListener('click',()=>officialLogin(true));
+async function reauthIdentity(identity){
+  if(!identity.reauthRuntimeId)return;
+  try{$('error').hidden=true;const response=await apiFetch('/api/official-login/refresh',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({runtimeId:identity.reauthRuntimeId})});const value=await response.json();if(!response.ok)throw new Error(value.error);await loginStatus(true);}
+  catch(error){$('error').textContent=error.message;$('error').hidden=false;}
+}
 async function removeIdentity(identity){
   if(deleting||!confirm(`从面板移除“${identity.name}”${identity.memberIds.length>1?`的 ${identity.memberIds.length} 份档案`:''}？\n登录凭据会保留，不会注销账号。`))return;
   deleting=true;

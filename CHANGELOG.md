@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.5 - 2026-10-15
+
+- Keep independent official profiles persistent through the native refresh-token flow; do not add a competing background refresh loop.
+- Add per-account “重新登录” for revoked or invalid refresh tokens. Device-code reauthorization is isolated, account/user fenced, atomically persisted to the matching private profile and preserves session bindings.
+- Keep system-level host login protected from panel overwrite and add reauthorization status polling and mismatch coverage.
+
 ## 0.1.4 - 2026-10-14
 
 - Display each official account's remaining periodic allowances, reset times and Credits balance in the registered-identity sidebar; do not infer a monetary currency.
