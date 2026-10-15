@@ -28,6 +28,7 @@ npm test
 powershell -NoProfile -ExecutionPolicy Bypass -File test/vault-test.ps1
 node test/runtime-smoke.mjs upstream/codex-rs/target/release/codex-app-server.exe legacy
 node test/runtime-smoke.mjs upstream/codex-rs/target/release/codex-app-server.exe paginated
+node test/side-chat-identity-smoke.mjs upstream/codex-rs/target/release/codex-app-server.exe
 ```
 
 `build-native.ps1` uses `rustc` from PATH; select Rust 1.95.0 before running it. Native launcher integration tests under `test/` use isolated fixture processes rather than restarting the production Desktop. Read their parameters before running them.

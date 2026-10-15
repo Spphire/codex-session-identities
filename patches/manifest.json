@@ -2,7 +2,7 @@
   "upstream": "https://github.com/openai/codex.git",
   "baseCommit": "0c7362d121d1c7f69540262425fd4e2209fd8e8d",
   "toolchain": "1.95.0-x86_64-pc-windows-msvc",
-  "patches": ["0001-session-identity-runtime.patch", "0002-installed-client-version.patch", "0003-desktop-remote-version.patch", "0004-identity-catalog-performance.patch"],
+  "patches": ["0001-session-identity-runtime.patch", "0002-installed-client-version.patch", "0003-desktop-remote-version.patch", "0004-identity-catalog-performance.patch", "0005-side-chat-identity-sync.patch"],
   "stage": "validated-windows-desktop",
   "productionReady": true,
   "testFilter": "identity_auth_overrides_do_not_share_the_process_account_or_catalog"

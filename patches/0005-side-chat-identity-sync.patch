@@ -1,0 +1,168 @@
+diff --git a/codex-rs/app-server/src/request_processors/thread_identity.rs b/codex-rs/app-server/src/request_processors/thread_identity.rs
+index a8412a1..1e86a9e 100644
+--- a/codex-rs/app-server/src/request_processors/thread_identity.rs
++++ b/codex-rs/app-server/src/request_processors/thread_identity.rs
+@@ -12,6 +12,8 @@ use tokio::io::AsyncWriteExt;
+ pub(super) struct IdentityBinding {
+     pub identity_id: String,
+     pub revision: u32,
++    #[serde(default)]
++    pub parent_thread_id: Option<ThreadId>,
+ }
+ 
+ #[derive(Deserialize)]
+@@ -38,6 +40,114 @@ fn validate_identity_id(value: &str) -> Result<(), JSONRPCErrorError> {
+ }
+ 
+ impl ThreadRequestProcessor {
++    async fn forked_identity_descendants(
++        &self,
++        root: ThreadId,
++    ) -> Result<Vec<ThreadId>, JSONRPCErrorError> {
++        let mut records = Vec::new();
++        for archived in [false, true] {
++            let mut cursor = None;
++            loop {
++                let page = self
++                    .thread_store
++                    .list_threads(codex_thread_store::ListThreadsParams {
++                        page_size: 100,
++                        cursor: cursor.clone(),
++                        sort_key: codex_thread_store::ThreadSortKey::CreatedAt,
++                        sort_direction: codex_thread_store::SortDirection::Asc,
++                        allowed_sources: Vec::new(),
++                        model_providers: None,
++                        cwd_filters: None,
++                        section: None,
++                        project_id: None,
++                        archived,
++                        search_term: None,
++                        relation_filter: None,
++                        use_state_db_only: true,
++                    })
++                    .await
++                    .map_err(|error| internal_error(format!("cannot inspect side chats: {error}")))?;
++                records.extend(page.items);
++                let Some(next) = page.next_cursor else { break };
++                if cursor.as_ref() == Some(&next) { break }
++                cursor = Some(next);
++            }
++        }
++        let mut parents = HashMap::new();
++        for (&child, binding) in self.identity_bindings.lock().await.iter() {
++            if let Some(parent) = binding.parent_thread_id {
++                parents.entry(child).or_insert(parent);
++            }
++        }
++        for record in records {
++            if let Some(parent) = record.forked_from_id.or(record.parent_thread_id) {
++                parents.entry(record.thread_id).or_insert(parent);
++            }
++        }
++        let mut descendants = Vec::new();
++        let mut frontier = vec![root];
++        while let Some(parent) = frontier.pop() {
++            for (&child, &candidate_parent) in &parents {
++                if candidate_parent == parent && !descendants.contains(&child) {
++                    descendants.push(child);
++                    frontier.push(child);
++                }
++            }
++        }
++        Ok(descendants)
++    }
++
++    async fn side_chat_identity_is_busy(
++        &self,
++        root: ThreadId,
++    ) -> Result<bool, JSONRPCErrorError> {
++        for child in self.forked_identity_descendants(root).await? {
++            let Ok(thread) = self.thread_manager.get_thread(child).await else { continue };
++            if matches!(thread.agent_status().await, AgentStatus::Running)
++                || !thread.list_background_terminals().await.is_empty()
++                || matches!(
++                    self.thread_watch_manager.loaded_status_for_thread(&child.to_string()).await,
++                    ThreadStatus::Active { .. }
++                )
++            {
++                return Ok(true);
++            }
++        }
++        Ok(false)
++    }
++
++    async fn synchronize_side_chat_identity(
++        &self,
++        root: ThreadId,
++        binding: &IdentityBinding,
++    ) -> Result<(), JSONRPCErrorError> {
++        for child in self.forked_identity_descendants(root).await? {
++            let previous = self.load_identity_binding(child).await?;
++            let next = IdentityBinding {
++                identity_id: binding.identity_id.clone(),
++                revision: previous
++                    .as_ref()
++                    .map_or(1, |value| value.revision.saturating_add(1)),
++                parent_thread_id: previous
++                    .as_ref()
++                    .and_then(|value| value.parent_thread_id)
++                    .or(Some(root)),
++            };
++            self.save_identity_binding(child, Some(&next)).await?;
++            if let Ok(thread) = self.thread_manager.get_thread(child).await {
++                if !thread.shutdown_if_idle().await.map_err(|_| {
++                    internal_error("cannot unload idle side chat during identity change")
++                })? {
++                    return Err(invalid_request("side chat became busy; retry identity change"));
++                }
++                self.thread_manager.remove_thread(&child).await;
++                self.outgoing.cancel_requests_for_thread(child, None).await;
++                self.identity_bindings.lock().await.remove(&child);
++            }
++        }
++        Ok(())
++    }
++
+     pub(super) async fn pinned_identity_provider(
+         &self,
+         identity_id: &str,
+@@ -323,6 +433,7 @@ impl ThreadRequestProcessor {
+                     .expected_revision
+                     .checked_add(1)
+                     .ok_or_else(|| invalid_request("identity revision exhausted"))?,
++                parent_thread_id: None,
+             };
+             self.save_identity_binding(requested_id, Some(&binding))
+                 .await?;
+@@ -346,6 +457,15 @@ impl ThreadRequestProcessor {
+                 "identity switching currently requires a persisted root thread",
+             ));
+         }
++        if self.side_chat_identity_is_busy(id).await? {
++            let mut state = self
++                .thread_identity_read(ThreadIdentityReadParams {
++                    thread_id: id.to_string(),
++                })
++                .await?;
++            state.status = "busy".to_string();
++            return Ok(state);
++        }
+         if matches!(thread.agent_status().await, AgentStatus::Running)
+             || !thread.list_background_terminals().await.is_empty()
+             || matches!(
+@@ -428,6 +548,7 @@ impl ThreadRequestProcessor {
+                 .expected_revision
+                 .checked_add(1)
+                 .ok_or_else(|| invalid_request("identity revision exhausted"))?,
++            parent_thread_id: None,
+         };
+         self.thread_store
+             .persist_thread(id, PersistContext::Standard)
+@@ -506,6 +627,7 @@ impl ThreadRequestProcessor {
+                 })?;
+             return Err(error);
+         }
++        self.synchronize_side_chat_identity(id, &binding).await?;
+         self.identity_bindings.lock().await.insert(id, binding);
+         self.thread_identity_read(ThreadIdentityReadParams {
+             thread_id: id.to_string(),

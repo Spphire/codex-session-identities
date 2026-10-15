@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.6 - 2026-10-15
+
+- Propagate identity changes from a root session to existing forked side chats.
+- Record the parent reference on fork bindings, block a switch while a descendant is active, and reload idle descendants from the new identity before their next request.
+- Add a compiled-backend side-chat smoke test covering A -> fork -> B -> resumed side-chat request routing.
+
 ## 0.1.5 - 2026-10-15
 
 - Keep independent official profiles persistent through the native refresh-token flow; do not add a competing background refresh loop.

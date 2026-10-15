@@ -1,5 +1,6 @@
 {
   "summary": "../VALIDATION.md",
+  "sideChatSmoke": "../test/side-chat-identity-smoke.mjs",
   "testedDesktop": "26.1007.2314.0",
   "originalCli": "0.162.0-alpha.17.2",
   "nodeTests": {
