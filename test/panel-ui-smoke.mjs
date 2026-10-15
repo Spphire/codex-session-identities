@@ -31,6 +31,14 @@ try{
   const page=await browser.newPage();const errors=[];page.on('pageerror',error=>errors.push(error.message));
   await page.goto(`http://127.0.0.1:${server.address().port}/#access=${server.identityAccessToken}`);
   await page.waitForFunction(()=>document.querySelectorAll('#identities li').length===2);
+  await page.waitForFunction(()=>!document.querySelector('#yolo').disabled);
+  assert.equal(await page.getByRole('switch',{name:'YOLO',exact:true}).isChecked(),true);
+  await page.getByRole('switch',{name:'YOLO',exact:true}).uncheck();
+  await page.waitForFunction(()=>!document.querySelector('#yolo').disabled&&document.querySelector('#permission-summary').textContent.includes('按需审批'));
+  await page.reload();await page.waitForFunction(()=>!document.querySelector('#yolo').disabled);
+  assert.equal(await page.getByRole('switch',{name:'YOLO',exact:true}).isChecked(),false);
+  await page.getByRole('switch',{name:'YOLO',exact:true}).check();
+  await page.waitForFunction(()=>!document.querySelector('#yolo').disabled&&document.querySelector('#permission-summary').textContent.includes('完整文件'));
   await page.waitForFunction(()=>document.querySelector('.credits-balance')?.textContent==='Credits 余额：12.5');
   assert.match(await page.locator('.official-usage').innerText(),/78% 剩余/);
   assert.match(await page.locator('.official-usage').innerText(),/59% 剩余/);
@@ -62,7 +70,7 @@ try{
   await page.waitForFunction(()=>document.querySelectorAll('#identities li').length===1);
   await page.reload();await page.waitForFunction(()=>document.querySelectorAll('#identities li').length===1);
   assert.deepEqual(errors,[]);
-  console.log(JSON.stringify({passed:true,officialUsage:true,deduplicated:true,usedRemovalDisabled:true,unusedRemovalPersists:true,desktopMobile:true}));
+  console.log(JSON.stringify({passed:true,yoloTogglePersists:true,officialUsage:true,deduplicated:true,usedRemovalDisabled:true,unusedRemovalPersists:true,desktopMobile:true}));
 }finally{
   await browser?.close();await new Promise(resolve=>server.close(resolve));rmSync(home,{recursive:true,force:true});
 }

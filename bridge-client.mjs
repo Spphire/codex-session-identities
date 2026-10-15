@@ -80,11 +80,11 @@ export class BridgeClient extends EventEmitter {
     }
   }
 
-  async call(method,params) {
+  async call(method,params,timeoutMs=60000) {
     await this.connect();if(!this.status().connected)throw new Error(this.reason);
     return new Promise((resolve,reject)=>{
       const id=`panel:${++this.sequence}`;
-      const timeout=setTimeout(()=>{this.pending.delete(id);reject(new Error('身份后端响应超时，尚不能确认是否生效'));},60000);
+      const timeout=setTimeout(()=>{this.pending.delete(id);reject(new Error('身份后端响应超时，尚不能确认是否生效'));},timeoutMs);
       this.pending.set(id,{resolve,reject,timeout});this.socket.write(JSON.stringify({id,method,params})+'\n');
     });
   }

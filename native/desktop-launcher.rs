@@ -37,6 +37,7 @@ fn run() -> std::io::Result<()> {
         .creation_flags(0x08000000);
     if std::env::args_os().skip(1).any(|arg| arg == "--check") { command.arg("-CheckOnly"); }
     if std::env::args_os().skip(1).any(|arg| arg == "--restart") { command.arg("-Restart"); }
+    if std::env::args_os().skip(1).any(|arg| arg == "--admin") { command.arg("-Admin"); }
     let status = command.status()?;
     writeln!(log, "powershell_exited code={:?}", status.code())?;
     if !status.success() { return Err(std::io::Error::other(format!("PowerShell exited with {:?}", status.code()))); }

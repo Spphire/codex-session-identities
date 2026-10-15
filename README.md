@@ -22,6 +22,9 @@ See [USER-GUIDE.md](USER-GUIDE.md) for installation, identity registration, swit
 - Duplicate official profiles are grouped by verified account/user, and unused identities can be removed from the panel without deleting credentials.
 - Authenticated loopback panel, single-instance tray and reusable dedicated Edge/Chrome panel window.
 - Restart launcher, installed-model catalog compatibility and execution-host synchronization.
+- Administrator launch by default with UAC, same-user credential fencing and backend elevation checks; a Standard shortcut remains available.
+- Persistent global YOLO switch, enabled by default, for full-access/no-command-approval execution. Switching off selects workspace access and on-request approvals for subsequent requests, including side chats.
+- Preserve native Appshots image/text transport across identity switches; capture remains owned by the installed Desktop.
 - Release backend, identity-scoped model caches, catalog preparation outside the shared commit lock, lifecycle-triggered queued retries and reusable panel rows.
 
 ## Build And Test

@@ -6,7 +6,7 @@ $Installation=(Resolve-Path -LiteralPath $Installation).Path
 $Source=(Resolve-Path -LiteralPath $Source).Path
 if($Installation -eq $Source){throw 'Source and installation must be separate directories'}
 $configuration=Get-Content (Join-Path $Installation 'runtime-config.json') -Raw | ConvertFrom-Json
-$files=@('catalog.mjs','official-login.mjs','official-usage.mjs','server.mjs','public\app.js','public\index.html','public\style.css','package.json','USER-GUIDE.md','PERFORMANCE.md','VALIDATION.md')
+$files=@('catalog.mjs','official-login.mjs','official-usage.mjs','execution-policy.cjs','bridge-client.mjs','server.mjs','public\app.js','public\index.html','public\style.css','package.json','USER-GUIDE.md','PERFORMANCE.md','VALIDATION.md')
 foreach($name in $files){if(!(Test-Path -LiteralPath (Join-Path $Source $name))){throw ('Missing panel update file: '+$name)}}
 $authFiles=@(Join-Path $configuration.codexHome 'auth.json')
 $profiles=Join-Path $configuration.codexHome 'session-identities\profiles'

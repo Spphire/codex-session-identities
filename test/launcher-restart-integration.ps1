@@ -1,4 +1,4 @@
-param([Parameter(Mandatory=$true)][string]$Installation,[Parameter(Mandatory=$true)][string]$FixtureDirectory)
+param([Parameter(Mandatory=$true)][string]$Installation,[Parameter(Mandatory=$true)][string]$FixtureDirectory,[switch]$Administrator,[string]$ResultPath)
 $ErrorActionPreference='Stop'
 $FixtureDirectory=$ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($FixtureDirectory)
 New-Item -ItemType Directory -Path $FixtureDirectory -Force|Out-Null
@@ -10,7 +10,7 @@ $dialog=$ast.Find({param($node) $node -is [Management.Automation.Language.Functi
 # Only the confirmation dialog is mocked. Process stop/start and native entry are real.
 $fixtureLauncher=$launcher.Remove($dialog.Extent.StartOffset,$dialog.Extent.EndOffset-$dialog.Extent.StartOffset).Insert($dialog.Extent.StartOffset,'function Show-LauncherMessage([string]$Text,[uint32]$Style){ if($Style -eq 0x24){return 6}; throw $Text }')
 [IO.File]::WriteAllText((Join-Path $FixtureDirectory 'Launch-Codex.ps1'),$fixtureLauncher,[Text.UTF8Encoding]::new($false))
-foreach($name in @('node.exe','codex-session-desktop.exe')){Copy-Item (Join-Path $Installation $name) $FixtureDirectory -Force}
+foreach($name in @('node.exe','codex-session-desktop.exe','launcher-permissions.ps1')){Copy-Item (Join-Path $Installation $name) $FixtureDirectory -Force}
 $fixtureSource=Join-Path $PSScriptRoot 'restart-fixture.cs'
 & 'C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe' /nologo /target:winexe /reference:System.Web.Extensions.dll ('/out:'+(Join-Path $FixtureDirectory 'TestDesktop.exe')) $fixtureSource
 if($LASTEXITCODE -ne 0){throw 'Fixture compilation failed'}
@@ -31,7 +31,8 @@ try {
     $deadline=[DateTime]::UtcNow.AddSeconds(5)
     while(!(Test-Path (Join-Path $FixtureDirectory 'test-live.json')) -and [DateTime]::UtcNow -lt $deadline){Start-Sleep -Milliseconds 100}
     $before=Get-Content (Join-Path $FixtureDirectory 'test-live.json') -Raw|ConvertFrom-Json
-    $native=Start-Process -FilePath (Join-Path $FixtureDirectory 'codex-session-desktop.exe') -ArgumentList '--restart' -WindowStyle Hidden -PassThru
+    $arguments=if($Administrator){'--admin --restart'}else{'--restart'}
+    $native=Start-Process -FilePath (Join-Path $FixtureDirectory 'codex-session-desktop.exe') -ArgumentList $arguments -WindowStyle Hidden -PassThru
     if(!$native.WaitForExit(25000)){throw 'Restart integration timed out'}
     if($native.ExitCode -ne 0){throw 'Native restart failed'}
     $status=Get-Content (Join-Path $FixtureDirectory 'launcher-status.json') -Raw|ConvertFrom-Json
@@ -40,7 +41,10 @@ try {
     if(Get-Process -Id $before.pid -ErrorAction SilentlyContinue){throw 'Previous backend still running'}
     if(!(Get-Process -Id $after.desktopPid -ErrorAction SilentlyContinue)){throw 'New desktop is not running'}
     if(!(Get-Process -Id $before.auxiliaryPid -ErrorAction SilentlyContinue)){throw 'Auxiliary child should not be killed or block restart'}
-    @{passed=$true;nativeLauncherUsed=$true;confirmationDialogMocked=$true;realProcessesStoppedAndReopened=$true;auxiliaryChildSurvived=$true;oldBackendPid=$before.pid;newBackendPid=$after.pid;actualCodexRestarted=$false}|ConvertTo-Json -Compress
+    if($Administrator -and (!$status.details.administratorRequested -or !$status.details.launcherElevated -or !$status.details.backendElevated)){throw 'Administrator mode did not elevate the backend'}
+    $result=@{passed=$true;nativeLauncherUsed=$true;confirmationDialogMocked=$true;realProcessesStoppedAndReopened=$true;auxiliaryChildSurvived=$true;oldBackendPid=$before.pid;newBackendPid=$after.pid;administratorRequested=[bool]$Administrator;launcherElevated=$status.details.launcherElevated;backendElevated=$status.details.backendElevated;actualCodexRestarted=$false}|ConvertTo-Json -Compress
+    if($ResultPath){[IO.File]::WriteAllText($ResultPath,$result,[Text.UTF8Encoding]::new($false))}
+    $result
 } finally {
     Get-CimInstance Win32_Process|Where-Object {$_.ExecutablePath -and $_.ExecutablePath.StartsWith($FixtureDirectory+'\',[StringComparison]::OrdinalIgnoreCase)}|ForEach-Object {Stop-Process -Id $_.ProcessId -ErrorAction SilentlyContinue}
 }

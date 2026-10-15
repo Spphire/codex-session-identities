@@ -1,5 +1,23 @@
-param([switch]$CheckOnly,[switch]$Restart)
+param([switch]$CheckOnly,[switch]$Restart,[switch]$Admin,[string]$ExpectedUserSid)
 $ErrorActionPreference='Stop'
+. (Join-Path $PSScriptRoot 'launcher-permissions.ps1')
+# Elevate before taking the launcher mutex. Keep the same Windows user and vault.
+if($ExpectedUserSid -and (Get-LauncherUserSid) -ne $ExpectedUserSid){throw 'Administrator mode must use the same Windows account. Sign in with an administrator account before launching.'}
+if($Admin -and !(Test-LauncherAdministrator)){
+    $powershell=Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+    $arguments=@('-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File',('"'+$PSCommandPath+'"'),'-Admin','-ExpectedUserSid',(Get-LauncherUserSid))
+    if($Restart){$arguments+='-Restart'}
+    if($CheckOnly){$arguments+='-CheckOnly'}
+    try{
+        $elevated=Start-Process -FilePath $powershell -ArgumentList $arguments -Verb RunAs -WindowStyle Hidden -PassThru
+        $null=$elevated.Handle
+        $elevated.WaitForExit()
+        exit $elevated.ExitCode
+    }catch [ComponentModel.Win32Exception]{
+        if($_.Exception.NativeErrorCode -eq 1223){exit 1223}
+        throw
+    }
+}
 $logPath=Join-Path $PSScriptRoot 'launcher-status.json'
 $stage='starting'
 function Write-LauncherStatus([string]$State,[object]$Details){
@@ -87,10 +105,11 @@ try{
     $backend=if($status.connected){Get-CimInstance Win32_Process -Filter ('ProcessId='+$status.pid)}else{$null}
     $alreadyLoaded=$backend -and $backend.ExecutablePath -eq $configuration.appServerExe
     $running=@(Get-CimInstance Win32_Process|Where-Object {$_.ExecutablePath -eq $configuration.desktopExe -and $_.CommandLine -notmatch '--type=|--user-data-dir='})
-    $mustRestart=$running.Count -gt 0 -and ($Restart -or !$alreadyLoaded)
+    $backendElevated=if($backend){Get-ProcessElevation ([int]$backend.ProcessId)}else{$null}
+    $mustRestart=$running.Count -gt 0 -and ($Restart -or !$alreadyLoaded -or ($Admin -and $backendElevated -ne $true))
     $previousBackendPid=if($backend){[int]$backend.ProcessId}else{0}
     if($CheckOnly){
-        $result=@{ready=$true;backendLoaded=[bool]$alreadyLoaded;desktopRunning=[bool]$running.Count;restartRequired=[bool]$mustRestart;backendPid=$previousBackendPid}
+        $result=@{ready=$true;backendLoaded=[bool]$alreadyLoaded;desktopRunning=[bool]$running.Count;restartRequired=[bool]$mustRestart;backendPid=$previousBackendPid;administratorRequested=[bool]$Admin;launcherElevated=(Test-LauncherAdministrator);backendElevated=$backendElevated}
         Write-LauncherStatus 'preflight_passed' $result
         $result|ConvertTo-Json -Compress
         exit 0
@@ -112,7 +131,11 @@ try{
         $status=& (Join-Path $PSScriptRoot 'node.exe') (Join-Path $PSScriptRoot 'runtime-status.mjs') $configuration.codexHome|ConvertFrom-Json
         if($status.connected){
             $backend=Get-CimInstance Win32_Process -Filter ('ProcessId='+$status.pid)
-            if($backend.ExecutablePath -eq $configuration.appServerExe -and (!$mustRestart -or $backend.ProcessId -ne $previousBackendPid)){$verified=$true;break}
+            if($backend.ExecutablePath -eq $configuration.appServerExe -and (!$mustRestart -or $backend.ProcessId -ne $previousBackendPid)){
+                $backendElevated=Get-ProcessElevation ([int]$backend.ProcessId)
+                if($Admin -and $backendElevated -ne $true){throw 'Administrator launch reused a non-elevated backend. Close other Codex windows and retry the Administrator shortcut.'}
+                $verified=$true;break
+            }
         }
         Start-Sleep -Milliseconds 500
     }while([DateTime]::UtcNow -lt $deadline)
@@ -120,7 +143,7 @@ try{
     & (Join-Path $PSScriptRoot 'node.exe') (Join-Path $PSScriptRoot 'open-panel.mjs') --check
     if($LASTEXITCODE -ne 0){throw 'Identity backend is active, but the panel service could not start.'}
     Start-Process -FilePath (Join-Path $PSScriptRoot 'identity-tray.exe') -WindowStyle Hidden
-    Write-LauncherStatus 'ready' @{backendPid=$status.pid;desktopLaunchPid=$desktop.Id;panelPort=$configuration.panelPort}
+    Write-LauncherStatus 'ready' @{backendPid=$status.pid;desktopLaunchPid=$desktop.Id;panelPort=$configuration.panelPort;administratorRequested=[bool]$Admin;launcherElevated=(Test-LauncherAdministrator);backendElevated=$backendElevated}
 }catch{
     $failedStage=$stage
     try{Write-LauncherStatus 'failed' @{stage=$failedStage;message=$_.Exception.Message;line=$_.InvocationInfo.ScriptLineNumber}}catch{}

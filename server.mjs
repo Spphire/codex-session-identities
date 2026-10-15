@@ -11,12 +11,20 @@ import {OfficialUsage} from './official-usage.mjs';
 import { BridgeClient } from './bridge-client.mjs';
 import { SwitchCoordinator } from './switch-coordinator.mjs';
 import { existsSync } from 'node:fs';
+import permissionControl from './execution-policy.cjs';
 
 const root = dirname(fileURLToPath(import.meta.url));
-export function panelServer({ codexDirectory, switcherDirectory, originalCodexExe, officialUsageOptions, accessToken=randomBytes(32).toString('hex') }) {
+export function panelServer({ codexDirectory, switcherDirectory, originalCodexExe, officialUsageOptions, bridge:providedBridge, accessToken=randomBytes(32).toString('hex') }) {
   const login=new OfficialLogin(codexDirectory,originalCodexExe);
   const usage=new OfficialUsage(codexDirectory,officialUsageOptions);
-  const bridge = new BridgeClient(codexDirectory);
+  const bridge = providedBridge || new BridgeClient(codexDirectory);
+  let executionPolicy;
+  const permissionStore=()=>executionPolicy??=new permissionControl.ExecutionPolicy(codexDirectory);
+  async function permissionsView(){
+    const saved=permissionStore().read();let runtimeSupported=false;
+    if((await bridge.connect()).connected){try{const live=await bridge.call('bridge/permissions/read',{},2000);runtimeSupported=live.supported===true&&live.revision===saved.revision;}catch{}}
+    return {...saved,runtimeSupported,effectiveFrom:'next-turn'};
+  }
   let coordinator=existsSync(join(codexDirectory,'session-identities','panel-bindings.sqlite'))?new SwitchCoordinator(codexDirectory,bridge):null;
   const observed=new Map();
   let writes=Promise.resolve();
@@ -40,6 +48,23 @@ export function panelServer({ codexDirectory, switcherDirectory, originalCodexEx
       if(supplied.length!==expected.length||!timingSafeEqual(supplied,expected)){json(401,{error:'面板访问未授权'});return;}
     }
     try {
+      if(req.url==='/api/permissions'&&req.method==='GET'){json(200,await permissionsView());return;}
+      if(req.url==='/api/permissions'&&req.method==='POST'){
+        if(req.headers.origin!==`http://${host}`||!req.headers['content-type']?.startsWith('application/json')){json(403,{error:'仅接受面板内操作'});return;}
+        let body='';for await(const chunk of req){body+=chunk;if(Buffer.byteLength(body)>4096){json(413,{error:'请求过大'});return;}}
+        const input=JSON.parse(body);
+        try{
+          await exclusive(async()=>{
+            if((await bridge.connect()).connected){
+              const live=await bridge.call('bridge/permissions/read',{},2000).catch(()=>null);
+              if(live?.supported){const result=await bridge.call('configRequirements/read',{},2000);permissionControl.assertAllowed(input.mode,result.requirements);}
+            }
+            return permissionStore().set(input);
+          });
+          json(200,await permissionsView());
+        }catch(error){json(409,{error:error.message});}
+        return;
+      }
       if(req.url==='/api/official-login'&&req.method==='GET'){json(200,login.view());return;}
       if(req.method==='POST'&&['/api/official-login/start','/api/official-login/cancel'].includes(req.url)){
         if(req.headers.origin!==`http://${host}`||!req.headers['content-type']?.startsWith('application/json')){json(403,{error:'仅接受面板内操作'});return;}
@@ -113,7 +138,7 @@ export function panelServer({ codexDirectory, switcherDirectory, originalCodexEx
       json(500, { error: error instanceof SyntaxError?'请求格式无效':String(error.message || '身份操作失败') });
     }
   });
-  server.on('close',()=>{usage.close();coordinator?.close();bridge.close();void login.cancel().catch(()=>{});});
+  server.on('close',()=>{usage.close();coordinator?.close();bridge.close();executionPolicy?.close();void login.cancel().catch(()=>{});});
   Object.defineProperty(server,'identityAccessToken',{value:accessToken});
   return server;
 }

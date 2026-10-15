@@ -1,5 +1,16 @@
 # Validation Summary
 
+v0.1.7 remote deployment validation: a second Windows host passed all 54 Node tests, the real-backend/bridge/panel YOLO smoke test, Appshots transport smoke, and the isolated native restart/token fixture. The panel update preserved official auth-file hashes and the backend binary; the production backend PID was unchanged. The default Administrator shortcut and persisted YOLO preference were verified from a separate SSH connection. Loading the new bridge in the production Desktop still requires one normal restart. Test temporary directories must sit outside the source package tree so extensionless CommonJS fixtures do not inherit its `type: module` setting.
+
+YOLO panel control (unreleased, 2026-10-15): 54 Node tests passed, including authenticated permission writes, persistent defaults, stale-version rejection and managed-policy refusal. The real v8 backend behind the bridge confirmed full-access/never defaults and executed a write outside the fixture workspace. After a mode change and a new turn, it reported workspaceWrite/on-request; a fork followed the setting and returned to full access on its next turn without a backend restart. Three synthetic local Responses requests were used, with no real model calls or credentials. Edge desktop/mobile QA verified toggle persistence, existing account controls and no layout overflow. Native loaded-thread resume retains its earlier settings until a new turn; the UI explicitly describes next-turn semantics. Production Desktop is not restarted automatically during deployment.
+
+Appshots and optional administrator launcher (unreleased, 2026-10-15):
+
+- All 51 existing Node tests passed. Native launcher rebuilt with Rust 1.95.0; PowerShell token inspection matched the current process privilege and treated unavailable PIDs as unknown. Shortcut generation selected the explicit `--admin --restart` entry.
+- The actual v8 backend behind the real bridge accepted inline PNG and local-image inputs. A synthetic local Responses service received the image and window text under identity A, retained both after identity B and a cold resume, and received a subsequent local screenshot. No real screenshot or credentials were transmitted. Native capture/menu clicking and real-account screenshot inference were not tested.
+- Isolated normal and UAC-elevated restart fixtures stopped/reopened their desktop/backend processes, retained unrelated auxiliary processes and verified normal vs administrator backend tokens. The elevated run recorded both `launcherElevated=true` and `backendElevated=true`. These fixtures did not restart the production Desktop or prove elevation of every native computer-use helper.
+- Appshots capture and feature availability remain owned by the installed Desktop and its organization policy. No ASAR edits or feature-gate overrides are installed.
+
 Baseline: Windows Desktop `26.1007.2314.0`, original CLI `0.162.0-alpha.17.2`, Rust `1.95.0`, upstream commit `0c7362d121d1c7f69540262425fd4e2209fd8e8d`.
 
 The following checks were performed during development. Raw real-account reports remain private because they include machine, identity and chat metadata. These are historical checks on the stated baseline, not guarantees for newer Desktop builds.

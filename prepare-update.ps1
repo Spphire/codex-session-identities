@@ -27,6 +27,10 @@ if($Build){
         & node (Join-Path $PSScriptRoot 'test\runtime-smoke.mjs') (Join-Path $Checkout 'codex-rs\target\release\codex-app-server.exe') $mode
         if($LASTEXITCODE -ne 0){throw 'Candidate native routing smoke failed'}
     }
+    & node (Join-Path $PSScriptRoot 'test\appshot-smoke.mjs') (Join-Path $Checkout 'codex-rs\target\release\codex-app-server.exe')
+    if($LASTEXITCODE -ne 0){throw 'Candidate Appshots transport smoke failed'}
+    & node (Join-Path $PSScriptRoot 'test\execution-policy-smoke.mjs') (Join-Path $Checkout 'codex-rs\target\release\codex-app-server.exe')
+    if($LASTEXITCODE -ne 0){throw 'Candidate execution permissions smoke failed'}
 }
 Write-Output ('Candidate prepared: '+$Checkout)
 Write-Output 'Validate the actual Desktop version before replacing the installed runtime or updating the supported-version manifest.'

@@ -31,7 +31,7 @@ if(Test-Path -LiteralPath $accessFile){
 New-Item -ItemType Directory -Path $InstallDirectory -Force|Out-Null
 Copy-Item -Path (Join-Path $payload '*') -Destination $InstallDirectory -Recurse -Force
 foreach($name in $companionNames){Copy-Item -LiteralPath (Join-Path $originalDirectory $name) -Destination (Join-Path $InstallDirectory $name) -Force}
-$configuration=@{originalCodexExe=$CodexExe;appServerExe=(Join-Path $InstallDirectory 'codex-app-server.exe');desktopExe=$DesktopExe;codexHome=$CodexHome;panelPort=18189;integrationTests=$false;upstreamCommit='0c7362d121d1c7f69540262425fd4e2209fd8e8d'}
+$configuration=@{originalCodexExe=$CodexExe;appServerExe=(Join-Path $InstallDirectory 'codex-app-server.exe');desktopExe=$DesktopExe;codexHome=$CodexHome;panelPort=18189;integrationTests=$false;managePermissions=$true;upstreamCommit='0c7362d121d1c7f69540262425fd4e2209fd8e8d'}
 [IO.File]::WriteAllText((Join-Path $InstallDirectory 'runtime-config.json'),($configuration|ConvertTo-Json),[Text.UTF8Encoding]::new($false))
 $env:CODEX_HOME=$CodexHome
 $node=Join-Path $InstallDirectory 'node.exe'
@@ -47,14 +47,7 @@ if(Test-Path -LiteralPath (Join-Path $CodexHome 'identity-switcher\state.json'))
     if($LASTEXITCODE -ne 0){Write-Warning 'Some saved identities require re-registration or import from the interactive Windows login.'}
 }
 if(!$NoShortcuts){
-    $shell=New-Object -ComObject WScript.Shell
-    $desktop=[Environment]::GetFolderPath('DesktopDirectory')
-    $link=$shell.CreateShortcut((Join-Path $desktop 'Codex - Session Identities.lnk'))
-    $link.TargetPath=Join-Path $InstallDirectory 'codex-session-desktop.exe'
-    $link.Arguments='--restart'
-    $link.WorkingDirectory=$InstallDirectory;$link.IconLocation=$DesktopExe;$link.Save()
-    $link=$shell.CreateShortcut((Join-Path $desktop 'Codex Identity Panel.lnk'))
-    $link.TargetPath=Join-Path $InstallDirectory 'identity-panel.exe';$link.WorkingDirectory=$InstallDirectory;$link.Save()
+    & (Join-Path $InstallDirectory 'Install-Shortcuts.ps1') -Installation $InstallDirectory
 }
 Write-Output ('Installed: '+$InstallDirectory)
 Write-Output ('Original CLI: '+$version)

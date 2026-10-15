@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.7 - 2026-10-15
+
+- Add an explicit Administrator shortcut and `--admin` launcher option using Windows UAC, same-user checks and backend process-token verification.
+- Retain the normal launcher and native Appshots capture; add a real-backend/bridge synthetic image-and-text regression covering identity reload and local screenshot input.
+- Add a persistent global YOLO panel switch, enabled by default, applying full access/no command approvals or workspace/on-request permissions to subsequent bridged Desktop requests across identities and side chats. Keep active turns unchanged and retain native managed-policy validation.
+- Make the main desktop shortcut request Administrator access; keep a separate Standard entry.
+
 ## 0.1.6 - 2026-10-15
 
 - Propagate identity changes from a root session to existing forked side chats.

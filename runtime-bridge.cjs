@@ -24,6 +24,10 @@ if (!isServer) {
 }
 
 function startBridge() {
+  const permissionControl=config.managePermissions===true
+    ? require('./execution-policy.cjs') : null;
+  const executionPolicy=permissionControl
+    ? new permissionControl.ExecutionPolicy(process.env.CODEX_HOME || path.join(os.homedir(),'.codex')) : null;
   // The desktop-only adapter delegates ordinary CLI commands to the installed CLI.
   // Standalone app-server accepts the same -c overrides but has no CLI subcommand.
   const serverExecutable=config.appServerExe || executable;
@@ -59,12 +63,16 @@ function startBridge() {
   const descriptorPath = path.join(registryDirectory,`${process.pid}.json`);
   const routes = new Map(); const clients = new Set(); const sockets = new Set();
   let sequence=0; let ready=false; let closing=false;
-  const permitted = new Set(['thread/list','thread/resume','thread/identity/read','thread/identity/set','model/list']);
+  const permitted = new Set(['thread/list','thread/resume','thread/identity/read','thread/identity/set','model/list','configRequirements/read','bridge/permissions/read']);
   if(config.integrationTests===true){for(const method of ['thread/start','thread/read','turn/start','thread/name/set','model/list'])permitted.add(method);}
   const send = (stream, value) => { if (!stream.destroyed && !stream.writableEnded) stream.write(JSON.stringify(value)+'\n'); };
   const responseError = (stream, id, message) => send(stream,{id,error:{code:-32001,message}});
   function forward(value, destination) {
     if (value.method && value.id != null) {
+      if(executionPolicy&&permissionControl.managedMethods.has(value.method)){
+        try{value=permissionControl.applyPolicy(value,executionPolicy.read());}
+        catch{responseError(destination,value.id,'Execution permission configuration is unavailable; request was not sent');return;}
+      }
       if(value.method==='model/list' && modelCatalog && validParams(value.params)){
         void forwardModels(value,destination);return;
       }
@@ -126,6 +134,9 @@ function startBridge() {
         if(config.integrationTests===true && value.method==='bridge/shutdown' && value.id!=null){send(socket,{id:value.id,result:{stopping:true}});child.stdin.end();continue;}
         if(!value.method || value.id==null || !permitted.has(value.method)){responseError(socket,value.id??null,'Method not allowed by identity bridge');continue;}
         if(!ready){responseError(socket,value.id,'Desktop has not initialized the backend');continue;}
+        if(value.method==='bridge/permissions/read'){
+          send(socket,{id:value.id,result:{supported:Boolean(executionPolicy),...(executionPolicy?executionPolicy.read():{})}});continue;
+        }
         forward(value,socket);
       }
     });
@@ -140,6 +151,7 @@ function startBridge() {
   function cleanup(code){
     if(closing)return;closing=true;
     modelCatalog?.close();
+    executionPolicy?.close();
     for(const route of routes.values())responseError(route.destination,route.id,'Backend stopped');
     for(const socket of sockets)socket.destroy();
     server.close();

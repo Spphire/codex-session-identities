@@ -159,3 +159,5 @@ node test/real-identity-routing-smoke.mjs <installation> <API-profile-id> <priva
 ```
 
 On a remote host with low system-disk space, set `PERF_TMP` to an existing directory on a roomy drive. The runtime fixture needs the original and patched executables plus matching companions; the panel test needs a running authenticated panel. Fixture code/configuration lives in the OS temporary directory and contains no real credentials. Do not include real profile directories or live `/api/state` payloads in published reports.
+
+YOLO control microbenchmark (local Windows, 2026-10-15): 10,000 persisted policy reads plus request transformations took 442.3 ms total, averaging 0.0442 ms per permission-bearing request after warmup. This measures the SQLite lookup and parameter mapping only, not RPC latency or inference. Unrelated metadata/model/identity RPCs do not read this policy. Mode changes persist synchronously and are picked up at the next permission-bearing request without polling or restarting the backend.

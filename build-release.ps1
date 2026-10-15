@@ -14,6 +14,9 @@ $files+='Open-PanelWindow.ps1'
 $files+='codex-session-desktop.exe'
 $files+='identity-tray.exe'
 $files+='register-second-official.mjs'
+$files+='launcher-permissions.ps1'
+$files+='Install-Shortcuts.ps1'
+$files+='execution-policy.cjs'
 foreach($name in $files){Copy-Item -LiteralPath (Join-Path $PSScriptRoot $name) -Destination (Join-Path $payload $name) -Force}
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'public') -Destination $payload -Recurse -Force
 Copy-Item -LiteralPath $PatchedAppServer -Destination (Join-Path $payload 'codex-app-server.exe') -Force

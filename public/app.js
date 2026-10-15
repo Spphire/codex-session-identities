@@ -8,6 +8,28 @@ let refreshing = false;
 let identityDetail = null;
 let submitting = false;
 let deleting=false;
+let permissions=null;let savingPermissions=false;
+function renderPermissions(){
+  if(!permissions){$('yolo').disabled=true;return;}
+  if(!savingPermissions)$('yolo').checked=permissions.mode==='yolo';$('yolo').disabled=savingPermissions;
+  $('permission-summary').textContent=permissions.mode==='yolo'?'完整文件与网络访问 · 免命令审批':'工作区访问 · 按需审批';
+  $('permission-status').textContent=permissions.runtimeSupported?'所有本机会话及侧边聊天，下一轮生效；当前回复和已启动命令保持原权限。':'已保存；重启 Codex 后启用权限控制。';
+}
+async function refreshPermissions(){
+  if(savingPermissions)return;
+  const response=await apiFetch('/api/permissions');const value=await response.json();if(!response.ok)throw new Error(value.error);
+  if(!savingPermissions&&(!permissions||value.revision>=permissions.revision)){permissions=value;renderPermissions();}
+}
+$('yolo').addEventListener('change',async()=>{
+  if(!permissions||savingPermissions)return;
+  const mode=$('yolo').checked?'yolo':'standard';savingPermissions=true;renderPermissions();
+  try{
+    const response=await apiFetch('/api/permissions',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({mode,expectedRevision:permissions.revision})});
+    const value=await response.json();if(!response.ok)throw new Error(value.error);
+    permissions=value;
+  }catch(error){$('error').textContent=error.message;$('error').hidden=false;}
+  finally{savingPermissions=false;renderPermissions();}
+});
 let identityPollTimer=null;
 let loginPollTimer=null;
 const rowCache=new Map();
@@ -139,7 +161,7 @@ async function refresh(){
     // Discard quota data immediately if a system login no longer matches its profile.
     for(const identity of state.identities)if(identity.kind==='chatgpt'&&!identity.available)officialUsage[identity.id]={status:'unavailable',message:'登录不匹配或已失效'};
     renderUsage();void refreshUsage();
-    renderRows();renderDetail();await loadIdentity();await loginStatus();
+    renderRows();renderDetail();await loadIdentity();await loginStatus();await refreshPermissions();
   }catch(error){$('error').textContent=error.message; $('error').hidden=false; $('connection').textContent='连接失败';}
   finally{refreshing=false;$('refresh').disabled=false;}
 }
