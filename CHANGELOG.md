@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.11 - 2026-10-28
+
+- When direct process creation returns Windows access-denied for the current user's registered Codex Store executable, retry in that exact package's context. Preserve the launcher configuration paths explicitly; package activation does not inherit the caller's environment.
+- Keep the existing backend-path and administrator handshake checks. A launched window alone never confirms identity integration. No package ACL, registration or global environment changes are made.
+- Preserve nested Windows error codes, exception types, launch path and elevation context in launch failure diagnostics.
+- Validate package-context startup in an isolated real Desktop profile on 26.1021.3705.0; the reported 26.1023.6123.0 host still requires its own handshake verification.
+
 ## 0.1.10 - 2026-10-28
 
 - Release completed owned subagents before an ordinary identity switch, retaining their result in the parent context and keeping their saved history.

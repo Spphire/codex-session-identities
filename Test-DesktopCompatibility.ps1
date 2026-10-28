@@ -20,7 +20,7 @@ try{
     $env:CODEX_HOME=$probeHome;$env:CODEX_CLI_PATH=Join-Path $Installation 'codex-identity.exe';$env:CODEX_ELECTRON_USER_DATA_PATH=$profile;$env:RUST_MIN_STACK='33554432'
     $env:CODEX_SQLITE_HOME=$probeHome
     $process=Start-IdentityDesktop -DesktopExe $configuration.desktopExe -Installation $Installation -Arguments ('--no-startup-window --user-data-dir="'+$profile+'"') -Probe
-    $outputTask=$process.StandardOutput.ReadToEndAsync();$errorTask=$process.StandardError.ReadToEndAsync()
+    if($process.StartInfo.RedirectStandardOutput){$outputTask=$process.StandardOutput.ReadToEndAsync();$errorTask=$process.StandardError.ReadToEndAsync()}
     $snapshot=Get-CimInstance Win32_Process -Filter ('ProcessId='+$process.Id)
     if(!$snapshot){throw 'Probe Desktop exited before initialization'}
     $known[$process.Id]=$snapshot.CreationDate
@@ -46,8 +46,8 @@ try{
     }
     foreach($name in $names){[Environment]::SetEnvironmentVariable($name,$saved[$name])}
     if($process){
-        if($outputTask.Wait(3000)){[IO.File]::WriteAllText((Join-Path $fixture 'stdout.log'),$outputTask.Result)}
-        if($errorTask.Wait(3000)){[IO.File]::WriteAllText((Join-Path $fixture 'stderr.log'),$errorTask.Result)}
+        if($outputTask -and $outputTask.Wait(3000)){[IO.File]::WriteAllText((Join-Path $fixture 'stdout.log'),$outputTask.Result)}
+        if($errorTask -and $errorTask.Wait(3000)){[IO.File]::WriteAllText((Join-Path $fixture 'stderr.log'),$errorTask.Result)}
         $process.Dispose()
     }
 }

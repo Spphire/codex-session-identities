@@ -91,5 +91,14 @@
     "pairedExecution": true,
     "remoteApricity": "ssh-unreachable",
     "externalModelRequests": 0
+  },
+  "storeLaunchFallback": {
+    "date": "2026-10-28",
+    "isolatedRealDesktop": "26.1021.3705.0",
+    "nativeBackendHandshake": true,
+    "productionRestarted": false,
+    "reportedDesktop26_1023_6123_0": "pending-user-verification",
+    "nestedNativeErrorRetained": true,
+    "fallbackScopeUnitTests": true
   }
 }

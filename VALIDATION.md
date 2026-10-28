@@ -1,5 +1,10 @@
 # Validation Summary
 
+2026-10-28 Store launch fallback (0.1.11):
+- Real package-context invocation confirmed that caller environment variables are not inherited. The new helper transfers only the six launcher configuration variables and keeps backend verification mandatory.
+- Forced package-context startup passed the real isolated-profile Desktop handshake on 26.1021.3705.0 against the installed v13 backend. Production Desktop was not restarted. This validates the alternative startup mechanism, not the reported friend's 26.1023.6123.0 installation.
+- Synthetic launch-error tests retain nested Win32 code 5. Fallback tests cover Store access-denied, custom-path rejection, missing-file errors, UAC-cancellation errors and preservation of probe arguments.
+
 2026-10-28 owned-work force switch (0.1.10):
 - All 94 Node tests passed. Bridge tests cover capability gating, exact parameter validation and pause-only goal control. Controller tests cover active-goal pause, verified success, stale confirmations and explicit failure without continued queuing or credential disclosure.
 - Isolated real v13 backend tests passed: active child blocks ordinary switching; a completed child is released and its result remains in the next model request; force stops an active parent response, owned background terminal and owned child; an independent fork retains its terminal and identity. Invalid target preparation leaves tasks running.

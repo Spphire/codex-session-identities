@@ -194,7 +194,9 @@ try{
 }catch{
     $failedStage=$stage
     $failureMessage=$_.Exception.Message
-    try{Write-LauncherStatus 'failed' @{stage=$failedStage;message=$_.Exception.Message;line=$_.InvocationInfo.ScriptLineNumber}}catch{}
+    $failureDetails=@{stage=$failedStage;message=$failureMessage;line=$_.InvocationInfo.ScriptLineNumber;exceptionChain=@(Get-IdentityLaunchError $_.Exception);launcherElevated=(Test-LauncherAdministrator)}
+    if($configuration -and $configuration.desktopExe){$failureDetails.desktopExe=$configuration.desktopExe;$failureDetails.desktopExists=[bool](Test-Path -LiteralPath $configuration.desktopExe -PathType Leaf)}
+    try{Write-LauncherStatus 'failed' $failureDetails}catch{}
     # An error dialog must not keep all later launch attempts locked out.
     if($mutexAcquired){$launcherMutex.ReleaseMutex();$mutexAcquired=$false}
     if($CheckOnly){[Console]::Error.WriteLine('Identity launcher preflight failed. See launcher-status.json.');exit 1}
