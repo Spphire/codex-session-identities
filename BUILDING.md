@@ -26,9 +26,15 @@ The patch preflight requires the exact baseline commit. It refuses a different r
 .\build-native.ps1
 npm test
 powershell -NoProfile -ExecutionPolicy Bypass -File test/vault-test.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File test/panel-elevation-check.ps1 -FixtureDirectory .\work\panel-elevation-fixture
+node bridge-health.mjs
+node --test test/bridge-health-smoke.mjs
 node test/runtime-smoke.mjs upstream/codex-rs/target/release/codex-app-server.exe legacy
 node test/runtime-smoke.mjs upstream/codex-rs/target/release/codex-app-server.exe paginated
 node test/side-chat-identity-smoke.mjs upstream/codex-rs/target/release/codex-app-server.exe
+node test/ephemeral-fork-identity-smoke.mjs upstream/codex-rs/target/release/codex-app-server.exe legacy
+node test/ephemeral-fork-identity-smoke.mjs upstream/codex-rs/target/release/codex-app-server.exe paginated
+node test/switch-blocker-smoke.mjs upstream/codex-rs/target/release/codex-app-server.exe
 ```
 
 `build-native.ps1` uses `rustc` from PATH; select Rust 1.95.0 before running it. Native launcher integration tests under `test/` use isolated fixture processes rather than restarting the production Desktop. Read their parameters before running them.
@@ -44,11 +50,11 @@ Optional fourth/fifth arguments select an exact backend executable and model, e.
 Read-only real official-usage QA: `node test/real-official-usage-smoke.mjs <installation>`. This performs no model inference, verifies that registered official accounts each return quota data, and checks that original auth-file hashes are unchanged. Its output contains real quota/credit values; keep it private. The optional browser QA also checks quota bars and Credits labels with synthetic values.
 
 ```powershell
-.\build-release.ps1 -PatchedAppServer .\upstream\codex-rs\target\release\codex-app-server.exe -OutputDirectory .\dist\windows
+.\build-release.ps1 -PatchedAppServer .\upstream\codex-rs\target\release\codex-app-server.exe -BackendRuntimeDirectory .\validated-backend-runtime -OutputDirectory .\dist\windows
 Compress-Archive -Path .\dist\windows\* -DestinationPath .\dist\CodexSessionIdentity-Windows.zip
 ```
 
-The packager includes Node.js, launcher binaries, scripts, the web UI, patches and licenses. It records payload SHA-256 hashes. At installation and launch, the original installed CLI supplies the compatible code-mode host, command runner and Windows sandbox setup executables.
+The packager includes Node.js, launcher binaries, scripts, the web UI, patches and licenses. It records payload SHA-256 hashes. BackendRuntimeDirectory must contain the three companions validated with that backend (codex-code-mode-host.exe, codex-command-runner.exe and codex-windows-sandbox-setup.exe), plus manifest.json mapping those names and codex-app-server.exe to SHA-256 hashes. Build or obtain them from the matching backend release and run the native execution probe before publishing. The installed official CLI continues to serve Desktop startup policy and catalog requests; Desktop updates must never replace the pinned backend companions. Launch rejects missing/mismatched manifests before stopping the existing Desktop, and preflight executes a real code-mode result plus nested Get-Location against loopback model responses without real accounts.
 
 For updates, `prepare-update.ps1` prepares a candidate checkout and tests; it does not prove Desktop compatibility. Verify both official-account switching and official/API switching, model catalog, Fast, tool execution, restart and panel authentication before deployment.
 
@@ -59,3 +65,9 @@ Performance checks and reproduction commands are in [PERFORMANCE.md](PERFORMANCE
 Patch preflight simulates overlapping patches sequentially in private Git indexes, then applies one combined change atomically. Both a clean full-series replay and already-applied detection were verified. The user's real index and unrelated changes are preserved. A partially applied series still requires review; start with a fresh pinned checkout when upgrading source patches.
 
 For a real routing model override without a backend override, set `IDENTITY_TEST_MODEL` (e.g. `gpt-5.6-luna`). Explicit command-line model arguments take precedence. An upstream capacity failure is a failed request, not a successful identity test.
+
+
+The eighth native patch adds thread/browser/read and thread/browser/reload. After building, run test/sidebar-browser-native-smoke.mjs from an isolated QA source directory with arguments <existing-test-installation> <candidate-backend.exe>. It uses a synthetic MCP host and loopback model fixture, checks busy/unconfigured/unloaded guards, forces a reconnect without modifying configuration and verifies sibling catalogs remain unchanged. This validates the native reconnect path; it is not a live website authorization or IAB page-operation test.
+
+
+The ninth patch replaces persistent fork identity coupling with one-time identity inheritance. Run test/fork-independent-identity-smoke.mjs <candidate> for an active fork with a legacy parentThreadId binding; its loopback server records actual per-request credentials while the root switches independently. Passing <old-candidate> legacy reproduces the previous blocker. The side-chat and ephemeral-fork fixtures now assert independent ordinary-fork accounts. The blocker fixture asserts a fork's background terminal does not block the root, while the same terminal still blocks switching its own session.

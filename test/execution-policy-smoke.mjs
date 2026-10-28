@@ -21,7 +21,7 @@ try{
   });server.listen(0,'127.0.0.1');await once(server,'listening');
   await mkdir(home);const work=join(home,'workspace');await mkdir(work);
   await writeFile(join(home,'config.toml'),`model = "gpt-5.1-codex"\nmodel_provider = "fixture"\n[model_providers.fixture]\nname = "fixture"\nbase_url = "http://127.0.0.1:${server.address().port}/v1"\nwire_api = "responses"\nrequires_openai_auth = false\nsupports_websockets = false\n[windows]\nsandbox = "unelevated"\n`);
-  for(const name of ['runtime-bridge.cjs','model-catalog-compat.cjs','client-version-compat.cjs','execution-policy.cjs'])await copyFile(new URL(`../${name}`,import.meta.url),join(root,name));
+  for(const name of ['runtime-bridge.cjs','model-catalog-compat.cjs','client-version-compat.cjs','feature-config-compat.cjs','execution-policy.cjs'])await copyFile(new URL(`../${name}`,import.meta.url),join(root,name));
   await writeFile(join(root,'runtime-config.json'),JSON.stringify({appServerExe:executable,managePermissions:true}));
   const env={...process.env,CODEX_HOME:home,RUST_MIN_STACK:'33554432',NO_PROXY:'127.0.0.1,localhost',no_proxy:'127.0.0.1,localhost'};for(const key of ['OPENAI_API_KEY','CODEX_ACCESS_TOKEN','CODEX_API_KEY'])delete env[key];
   client=new StdioClient(process.execPath,[join(root,'runtime-bridge.cjs'),'app-server','--analytics-default-enabled'],{cwd:work,env});

@@ -1,4 +1,4 @@
-param([Parameter(Mandatory=$true)][string]$Installation,[Parameter(Mandatory=$true)][string]$FixtureDirectory,[switch]$Administrator,[string]$ResultPath)
+param([Parameter(Mandatory=$true)][string]$Installation,[Parameter(Mandatory=$true)][string]$FixtureDirectory,[switch]$Administrator,[switch]$RejectCompatibility,[string]$ResultPath)
 $ErrorActionPreference='Stop'
 $FixtureDirectory=$ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($FixtureDirectory)
 New-Item -ItemType Directory -Path $FixtureDirectory -Force|Out-Null
@@ -10,7 +10,7 @@ $dialog=$ast.Find({param($node) $node -is [Management.Automation.Language.Functi
 # Only the confirmation dialog is mocked. Process stop/start and native entry are real.
 $fixtureLauncher=$launcher.Remove($dialog.Extent.StartOffset,$dialog.Extent.EndOffset-$dialog.Extent.StartOffset).Insert($dialog.Extent.StartOffset,'function Show-LauncherMessage([string]$Text,[uint32]$Style){ if($Style -eq 0x24){return 6}; throw $Text }')
 [IO.File]::WriteAllText((Join-Path $FixtureDirectory 'Launch-Codex.ps1'),$fixtureLauncher,[Text.UTF8Encoding]::new($false))
-foreach($name in @('node.exe','codex-session-desktop.exe','launcher-permissions.ps1')){Copy-Item (Join-Path $Installation $name) $FixtureDirectory -Force}
+foreach($name in @('node.exe','codex-session-desktop.exe','launcher-permissions.ps1','resolve-installation.ps1','launch-process.ps1')){Copy-Item (Join-Path $Installation $name) $FixtureDirectory -Force}
 $fixtureSource=Join-Path $PSScriptRoot 'restart-fixture.cs'
 & 'C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe' /nologo /target:winexe /reference:System.Web.Extensions.dll ('/out:'+(Join-Path $FixtureDirectory 'TestDesktop.exe')) $fixtureSource
 if($LASTEXITCODE -ne 0){throw 'Fixture compilation failed'}
@@ -25,6 +25,12 @@ try{const state=JSON.parse(fs.readFileSync(file));process.kill(state.pid,0);cons
 catch{console.log(JSON.stringify({connected:false}));}
 '@,[Text.UTF8Encoding]::new($false))
 [IO.File]::WriteAllText((Join-Path $FixtureDirectory 'open-panel.mjs'),'console.log(JSON.stringify({ready:true}));',[Text.UTF8Encoding]::new($false))
+# These isolated process-ownership fixtures do not run the real protocol/Desktop probes.
+[IO.File]::WriteAllText((Join-Path $FixtureDirectory 'compatibility-probe.mjs'),'console.log(JSON.stringify({passed:true,fingerprint:"fixture",cliVersion:"fixture"}));',[Text.UTF8Encoding]::new($false))
+if($RejectCompatibility){[IO.File]::WriteAllText((Join-Path $FixtureDirectory 'compatibility-probe.mjs'),'console.log(JSON.stringify({passed:false,error:"synthetic incompatible backend"}));process.exitCode=1;',[Text.UTF8Encoding]::new($false))}
+[IO.File]::WriteAllText((Join-Path $FixtureDirectory 'Test-DesktopCompatibility.ps1'),'param($Installation,$Fingerprint) @{passed=$true}|ConvertTo-Json -Compress',[Text.UTF8Encoding]::new($false))
+[IO.File]::WriteAllText((Join-Path $FixtureDirectory 'runtime-bundle.ps1'),'function Resolve-IdentityRuntime($Configuration,$Installation){return $Configuration}',[Text.UTF8Encoding]::new($false))
+[IO.File]::WriteAllText((Join-Path $FixtureDirectory 'ensure-provider-aliases.mjs'),'console.log(JSON.stringify({passed:true,providersAdded:0}));',[Text.UTF8Encoding]::new($false))
 $desktopPath=Join-Path $FixtureDirectory 'TestDesktop.exe'
 try {
     Start-Process -FilePath $desktopPath -WindowStyle Hidden|Out-Null
@@ -32,8 +38,23 @@ try {
     while(!(Test-Path (Join-Path $FixtureDirectory 'test-live.json')) -and [DateTime]::UtcNow -lt $deadline){Start-Sleep -Milliseconds 100}
     $before=Get-Content (Join-Path $FixtureDirectory 'test-live.json') -Raw|ConvertFrom-Json
     $arguments=if($Administrator){'--admin --restart'}else{'--restart'}
-    $native=Start-Process -FilePath (Join-Path $FixtureDirectory 'codex-session-desktop.exe') -ArgumentList $arguments -WindowStyle Hidden -PassThru
+    if($RejectCompatibility){
+        # The native wrapper intentionally opens an error dialog on failure.
+        # Exercise rejection through its PowerShell target without creating a UI.
+        $runner=Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+        $runnerArguments=@('-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File',('"'+(Join-Path $FixtureDirectory 'Launch-Codex.ps1')+'"'),'-Restart')
+        $native=Start-Process -FilePath $runner -ArgumentList $runnerArguments -WindowStyle Hidden -PassThru
+    }else{
+        $native=Start-Process -FilePath (Join-Path $FixtureDirectory 'codex-session-desktop.exe') -ArgumentList $arguments -WindowStyle Hidden -PassThru
+    }
     if(!$native.WaitForExit(25000)){throw 'Restart integration timed out'}
+    if($RejectCompatibility){
+        $failure=Get-Content -LiteralPath (Join-Path $FixtureDirectory 'launcher-status.json') -Raw -Encoding UTF8|ConvertFrom-Json
+        if($native.ExitCode -eq 0 -or $failure.state -ne 'failed' -or $failure.details.stage -ne 'checking_protocol_compatibility'){throw 'Compatibility rejection did not fail at the expected stage'}
+        if(!(Get-Process -Id $before.pid -ErrorAction SilentlyContinue) -or !(Get-Process -Id $before.desktopPid -ErrorAction SilentlyContinue)){throw 'Rejected update interrupted the existing Desktop'}
+        @{passed=$true;incompatibleUpdateRejected=$true;existingDesktopPreserved=$true;existingBackendPreserved=$true;actualCodexRestarted=$false}|ConvertTo-Json -Compress
+        return
+    }
     if($native.ExitCode -ne 0){throw 'Native restart failed'}
     $status=Get-Content (Join-Path $FixtureDirectory 'launcher-status.json') -Raw|ConvertFrom-Json
     $after=Get-Content (Join-Path $FixtureDirectory 'test-live.json') -Raw|ConvertFrom-Json

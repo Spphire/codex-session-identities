@@ -8,9 +8,10 @@ import {EventEmitter} from 'node:events';
 
 function setup(t){
   const directory=mkdtempSync(join(tmpdir(),'identity-coordinator-'));
-  const states=new Map();const busy=new Set();const writes=[];const coordinators=[];
+  const states=new Map();const busy=new Set();const blockers=new Map();const writes=[];const coordinators=[];
+  let runtimePid=42,connected=true;
   const events=new EventEmitter();
-  const bridge={on:events.on.bind(events),removeListener:events.removeListener.bind(events),status:()=>({connected:true,pid:42}),connect:async()=>({connected:true,pid:42}),call:async(method,params)=>{
+  const bridge={on:events.on.bind(events),removeListener:events.removeListener.bind(events),status:()=>({connected,pid:runtimePid}),connect:async()=>({connected,pid:runtimePid}),call:async(method,params)=>{
     const state=states.get(params.threadId)||{threadId:params.threadId,identityId:null,revision:0,verified:false,status:'unbound'};
     if(method==='thread/identity/read')return {...state};
     if(method==='thread/resume'){
@@ -18,14 +19,14 @@ function setup(t){
       states.set(params.threadId,{...state,status:'applied',verified:true});return {};
     }
     if(method==='thread/identity/set'){
-      if(busy.has(params.threadId))return {...state,status:'busy'};
+      if(busy.has(params.threadId))return {...state,status:'busy',blocker:blockers.get(params.threadId)};
       assert.equal(params.expectedRevision,state.revision);writes.push(params);
       const next={...state,identityId:params.identityId,revision:state.revision+1,verified:state.status!=='unloaded',status:state.status==='unloaded'?'unloaded':'applied'};states.set(params.threadId,next);return next;
     }
     throw new Error('Unexpected RPC');
   }};
   t.after(async()=>{for(const item of coordinators)item.close();await new Promise(r=>setImmediate(r));rmSync(directory,{recursive:true,force:true});});
-  return {states,busy,writes,events,create(){const coordinator=new SwitchCoordinator(directory,bridge);clearInterval(coordinator.timer);coordinators.push(coordinator);return coordinator;}};
+  return {states,busy,blockers,writes,events,replaceRuntime(pid){runtimePid=pid;},disconnect(){connected=false;},create(){const coordinator=new SwitchCoordinator(directory,bridge);clearInterval(coordinator.timer);coordinators.push(coordinator);return coordinator;}};
 }
 async function settled(coordinator){for(let i=0;i<20;i++){await new Promise(r=>setImmediate(r));if(!coordinator.inflight.size)return;}throw new Error('Coordinator did not settle');}
 
@@ -90,4 +91,26 @@ test('an unloaded session replaces an unavailable identity without resuming its 
   assert.equal(coordinator.store.read('one').confirmationPhase,'configured');
   assert.equal(coordinator.store.read('one').verified,false);
   assert.equal(fixture.states.get('one').status,'unloaded');
+});
+
+test('busy reasons are runtime-scoped metadata and clear after success or cancellation',async t=>{
+  const f=setup(t),c=f.create();f.busy.add('one');
+  f.blockers.set('one',{reason:'background_terminals',threadId:'11111111-1111-4111-8111-111111111111',terminalCount:2,command:'SECRET_TOKEN',output:'PRIVATE_OUTPUT'});
+  await c.submit('one','api_a',0,0);await settled(c);
+  const first=c.view('one').wait;assert.equal(first.reason,'background_terminals');assert.equal(first.terminalCount,2);
+  assert.doesNotMatch(JSON.stringify(first),/SECRET_TOKEN|PRIVATE_OUTPUT|command|output/);
+  await c.tick();assert.equal(c.view('one').wait.since,first.since);
+  f.replaceRuntime(43);assert.equal(c.view('one').wait,null);
+  await c.tick();assert.equal(c.view('one').wait.runtimeId,'runtime-43');
+  c.cancel('one',1);assert.equal(c.view('one').wait,null);
+  await c.submit('one','api_a',0,1);await settled(c);assert.equal(c.view('one').wait.revision,2);
+  f.busy.clear();await c.tick();assert.equal(c.view('one').wait,null);assert.equal(c.view('one').verified,true);
+});
+
+test('old or unknown backend blockers stay generic and never claim a guessed cause',async t=>{
+  const f=setup(t),c=f.create();f.busy.add('one');
+  await c.submit('one','api_a',0,0);await settled(c);assert.equal(c.view('one').wait.reason,'backend_busy');
+  f.blockers.set('one',{reason:'PRIVATE_BACKEND_TEXT',threadId:'javascript:secret',terminalCount:-2});
+  await c.tick();assert.equal(c.view('one').wait.reason,'backend_busy');assert.equal(c.view('one').wait.threadId,null);assert.equal(c.view('one').wait.terminalCount,0);
+  f.disconnect();assert.equal(c.view('one').wait,null);
 });

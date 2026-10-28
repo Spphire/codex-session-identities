@@ -1,0 +1,102 @@
+diff --git a/codex-rs/app-server-protocol/src/protocol/common.rs b/codex-rs/app-server-protocol/src/protocol/common.rs
+--- a/codex-rs/app-server-protocol/src/protocol/common.rs
++++ b/codex-rs/app-server-protocol/src/protocol/common.rs
+@@ -763,6 +763,16 @@
+         params: v2::ThreadBackgroundTerminalsTerminateParams,
+         serialization: thread_id(params.thread_id),
+         response: v2::ThreadBackgroundTerminalsTerminateResponse,
++    },
++    ThreadBrowserRead => "thread/browser/read" {
++        params: v2::ThreadIdentityReadParams,
++        serialization: thread_id(params.thread_id),
++        response: v2::ThreadBrowserResponse,
++    },
++    ThreadBrowserReload => "thread/browser/reload" {
++        params: v2::ThreadIdentityReadParams,
++        serialization: thread_id(params.thread_id),
++        response: v2::ThreadBrowserReloadResponse,
+     },
+     ThreadIdentityRead => "thread/identity/read" {
+         params: v2::ThreadIdentityReadParams,
+diff --git a/codex-rs/app-server-protocol/src/protocol/v2/thread.rs b/codex-rs/app-server-protocol/src/protocol/v2/thread.rs
+--- a/codex-rs/app-server-protocol/src/protocol/v2/thread.rs
++++ b/codex-rs/app-server-protocol/src/protocol/v2/thread.rs
+@@ -2218,3 +2218,17 @@
+     pub thread_id: String,
+     pub turn_id: String,
+ }
++
++#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
++#[serde(rename_all = "camelCase")]
++#[ts(export_to = "v2/")]
++pub struct ThreadBrowserResponse {
++    pub thread_id: String,
++    pub revision: u32,
++    pub status: String,
++}
++
++#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
++#[serde(transparent)]
++#[ts(export_to = "v2/")]
++pub struct ThreadBrowserReloadResponse(pub ThreadBrowserResponse);
+diff --git a/codex-rs/app-server/src/message_processor.rs b/codex-rs/app-server/src/message_processor.rs
+--- a/codex-rs/app-server/src/message_processor.rs
++++ b/codex-rs/app-server/src/message_processor.rs
+@@ -1471,6 +1471,12 @@
+                     .thread_background_terminals_terminate(params)
+                     .await
+             }
++            ClientRequest::ThreadBrowserRead { params, .. } => self
++                .thread_processor.thread_browser(params, false).await
++                .map(|response| Some(response.into())),
++            ClientRequest::ThreadBrowserReload { params, .. } => self
++                .thread_processor.thread_browser(params, true).await
++                .map(|response| Some(codex_app_server_protocol::ThreadBrowserReloadResponse(response).into())),
+             ClientRequest::ThreadIdentityRead { params, .. } => self
+                 .thread_processor
+                 .thread_identity_read(params)
+diff --git a/codex-rs/app-server/src/request_processors/thread_identity.rs b/codex-rs/app-server/src/request_processors/thread_identity.rs
+--- a/codex-rs/app-server/src/request_processors/thread_identity.rs
++++ b/codex-rs/app-server/src/request_processors/thread_identity.rs
+@@ -667,3 +667,41 @@
+         assert!(validate_identity_id("official_1234-abcd").is_ok());
+     }
+ }
++
++impl ThreadRequestProcessor {
++    pub(crate) async fn thread_browser(
++        &self,
++        params: ThreadIdentityReadParams,
++        reload: bool,
++    ) -> Result<codex_app_server_protocol::ThreadBrowserResponse, JSONRPCErrorError> {
++        let id = ThreadId::from_string(&params.thread_id)
++            .map_err(|_| invalid_params("invalid thread ID"))?;
++        let _permit = self.acquire_thread_list_state_permit().await?;
++        let mut status = "unloaded";
++        if let Ok(thread) = self.thread_manager.get_thread(id).await {
++            let config = thread.config().await;
++            // Reuse the resolved Desktop configuration; never synthesize trust or grants.
++            let configured = config.mcp_servers.get().iter().any(|(name, server)| {
++                server.enabled && (name == "node_repl" || name == "cua_repl") &&
++                match &server.transport {
++                    codex_config::McpServerTransportConfig::Stdio { env: Some(env), .. } =>
++                        env.get("BROWSER_USE_AVAILABLE_BACKENDS").is_some_and(|value|
++                            value.split(',').any(|backend| backend.trim() == "iab")),
++                    _ => false,
++                }
++            });
++            status = if !configured { "unconfigured" }
++                else if matches!(thread.agent_status().await, AgentStatus::Running)
++                    || matches!(self.thread_watch_manager.loaded_status_for_thread(&id.to_string()).await, ThreadStatus::Active { .. })
++                { "busy" } else { "ready" };
++            if reload && status == "ready" {
++                thread.submit(codex_protocol::protocol::Op::RefreshMcpServers).await
++                    .map_err(|_| internal_error("browser reconnect submission failed"))?;
++                status = "queued";
++            }
++        }
++        Ok(codex_app_server_protocol::ThreadBrowserResponse {
++            thread_id: id.to_string(), revision: 1, status: status.to_string(),
++        })
++    }
++}

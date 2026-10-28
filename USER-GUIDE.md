@@ -1,5 +1,9 @@
 # Codex 会话身份面板（Windows）
 
+0.1.9 后台终端阻塞确认：选择会话并请求切换身份后，如后端确认仅被该会话自己的后台终端阻塞，面板会弹出确认窗口，列出终端编号、可用的系统 PID / CPU 信息及关闭影响。点击“继续等待，不关闭任务”不会终止进程；也可用“取消等待”撤销切换。点击“关闭列出的终端并继续切换”只关闭确认时列出的所选会话终端，然后重新检查身份切换，不关闭分叉或其他聊天。
+
+确认两分钟内有效且只能使用一次。切换目标、后端进程或终端清单变化后必须重新确认。SSH 终端关闭不保证已分离的远端任务终止。命令可能包含凭据，因此确认窗口不展示完整命令。面板更新不自动重启 Codex；旧桥接必须正常重启后才能使用新接口，再次点击身份启动快捷方式会检测并提示重启，用户拒绝则保留当前任务。
+
 面板管理本机 Codex 桌面会话的模型身份。支持原有官方登录、已登记的 API 身份及独立官方账号档案。原有会话 ID、历史和工作目录继续使用。
 
 ## 安装
@@ -18,7 +22,7 @@
 
 ### 管理员模式
 
-默认入口和 `Codex - Session Identities (Administrator)` 都会请求管理员权限；`Codex - Session Identities (Standard)` 保留普通权限启动。各入口使用相同的账号档案和 `CODEX_HOME`。请在 UAC 中选择“是”；取消后不会关闭现有 Codex。不要改用另一个 Windows 账号授权，否则无法沿用原用户的凭据保险库。
+默认入口 `Codex - Session Identities` 会请求管理员权限；`Codex - Session Identities (Standard)` 保留普通权限启动，`Codex Identity Panel` 打开身份面板。旧版重复的 `Administrator` 快捷方式会在更新快捷方式时备份并移除；修改过目标或参数的快捷方式会保留。各入口使用相同的账号档案和 `CODEX_HOME`。请在 UAC 中选择“是”；取消后不会关闭现有 Codex。不要改用另一个 Windows 账号授权，否则无法沿用原用户的凭据保险库。
 
 已有 Codex 运行时，管理员入口仍会先询问是否重启。新启动器检查实际 app-server 的管理员令牌；不能用一个普通权限的旧后端冒充管理员模式。`launcher-status.json` 中的 `administratorRequested`、`launcherElevated` 和 `backendElevated` 可用于诊断。命令行等价入口为 `codex-session-desktop.exe --admin --restart`，`--admin --check` 只进行提权及预检，不关闭当前窗口。
 
@@ -46,6 +50,14 @@ Windows 管理员令牌仍由启动方式决定，YOLO 开关不会自动弹 UAC
 
 ## 使用
 
+### 切换等待原因
+
+切换身份等待时，右侧详情显示目标会话自身的回复、后台命令、运行中的子智能体或准备期间重新变忙等原因。普通分叉会话独立运行，不阻塞主会话切换，也不会随主会话改变身份。旧版后端仍可能报告分叉阻塞；需正常重启加载修复。等待会自动重试，也可取消，不会自动终止后台命令。
+
+暂停 `/goal` 只暂停目标继续执行，不会停止已经启动的后台终端。只读监视脚本也可能继续运行并阻塞身份切换；请先在原会话检查后台终端，确认用途后再决定是否结束。界面只显示命令数量，不展示命令参数、输出或凭据。
+
+详细原因需要加载含 `0006-identity-switch-blockers.patch` 的后端。旧后端仍能切换，但等待时明确显示“后端报告忙碌，但未提供具体原因”，不会猜测成目标暂停或登录失效。更新后端后重启一次即可；不需要为了显示等待提示更改身份凭据。
+
 ### 身份去重与移除
 
 同一账号的本体登录和独立档案按匹配的 account ID 与 user ID 合并展示，并注明来源和档案数。邮箱相同但账号或用户不同不会合并。合并不删除档案、不迁移会话绑定，也不改写登录凭据。本体换号后，旧固定身份显示“登录不匹配或已失效”，不能继续选择；不会用新账号邮箱替换旧身份。
@@ -70,7 +82,7 @@ Windows 管理员令牌仍由启动方式决定，YOLO 开关不会自动弹 UAC
 
 ### 侧边聊天与身份
 
-通过 Codex 的分支或侧边聊天打开的子 session 会继承创建时主 session 的身份。主 session 切换身份时，空闲的侧边聊天会同步绑定并在下一次发送前按新身份恢复；正在执行中的侧边聊天会让主 session 的切换等待，避免同一侧边聊天的一次请求跨越两个账号。切换后侧边聊天实际请求使用的 provider 和账号与主 session 一致。
+通过 Codex 分叉或侧边聊天创建的普通会话，只在创建时继承源会话的身份快照，之后各自独立。主会话切换不会等待、卸载或改写普通分叉，分叉也可单独切换。历史中的 forked_from_id 和旧绑定中的 parentThreadId 仅表示来源，不建立身份联动；已有旧绑定无需重写历史即可使用独立规则。真正通过子智能体机制启动且仍加载的任务，仍由原有保护规则处理。2026-10-23 的第九补丁取代旧版持续同步规则。
 
 实测已验证官方 Fast、切到 API 的标准请求、再切回官方 Fast。测试在独立目录运行，只向临时后端提供短期 access token，没有复制 refresh token。桌面模型菜单的账号能力仍属于主机级，这次修复未将其改为逐 session 的权限判断。公开验证摘要见源码仓库 `VALIDATION.md`。
 
@@ -147,3 +159,60 @@ v0.1.3 到 v0.1.4 只更新面板功能，Rust 后端保持不变。无需退出
 Windows 后端还需要同目录下的 `codex-code-mode-host.exe`、`codex-command-runner.exe`、`codex-windows-sandbox-setup.exe`。安装器从目标机器原版 CLI 目录复制这些文件；启动器补齐缺失文件，桥接程序启动后端前按哈希同步原版配套文件。手动只替换后端 EXE 不能代替完整部署。远端已验证实际命令执行及 Code Mode 宿主进程。
 
 托盘和面板快捷方式使用独立的 Edge 面板窗口（无 Edge 时使用 Chrome）。重复点击恢复并激活已有窗口；关闭后才重新打开。该窗口使用当前 Codex 配置目录下的专用浏览器配置，不修改日常浏览器标签页。旧版本在普通浏览器中打开的标签页可手动关闭。
+
+## Update-resilient launch (2026-10-21)
+
+Use the stable Session Identities shortcut after Store updates. The launcher discovers the registered Desktop and its bundled CLI together, stages backend and companion binaries in content-addressed runtime-bundles, and checks their hashes before use. Updating a companion creates a separate bundle instead of overwriting a running executable. Backend binaries are copied once into a private content store; bundles share that immutable copy where hard links are supported.
+
+Ordinary startup and --check run only a headless protocol probe in an empty CODEX_HOME, with inherited token/API-key variables removed and no inference requests. Checks cover initialization, thread listing, identity metadata, temporary threads, and both history modes. Successful results are cached by executable and adapter hashes. Full Desktop tests are an explicit maintenance action on a designated test machine; ordinary launch never opens a second test Desktop. The actual production launch must still complete its initialization handshake and connect to the expected identity backend before it is marked ready.
+
+An incompatible protocol check fails before the current Desktop is stopped. Version changes also recognize Desktop processes from older Store package directories. Failures retain a specific stage and message in launcher-status.json and append launcher-events.jsonl (rotated at 5 MiB). An error dialog releases the launcher mutex, so leaving it open cannot block subsequent launches. Preflight readiness is reported separately from a currently connected identity backend. A completed production launch saves last-successful-launch.json; configuration backups and previous runtime bundles remain available for deliberate recovery. There is no silent fallback to a global account or unpatched backend.
+
+Machine JSON from Node uses ASCII Unicode escapes so Windows PowerShell 5.1 legacy code pages cannot corrupt Chinese status messages. JSON files are read as UTF-8. Future incompatible Desktop protocols still require porting the native patch; discovery and initialization checks do not certify every feature, account, tool execution mode, or remote-control workflow.
+
+Provider recovery (2026-10-21, corrected): saved identity_* provider names are retained so old chats can load configuration. System aliases require both account and user to match the current global login. Independent official aliases are credential-free placeholders with requires_openai_auth=false and a pinned account header; the native identity manager supplies the private account on resume or switch. Do not install a global auth command on these aliases: native provider overrides deep-merge and set requires_openai_auth=true, which conflicts with a retained auth command. Independent identities require the identity launcher; these placeholders do not authorize standalone unpatched inference. Private credential files and the global default provider are not changed.
+
+The launcher runs ensure-provider-aliases.mjs before loading its runtime. It adds missing aliases and migrates only the exact legacy private-credential commands generated by this installation, replacing their whole provider table after backing up config.toml. Customized provider authentication is preserved. The original CLI config API writes changes and read-back verifies that no conflicting auth command remains. Access/refresh tokens are never copied into config.toml.
+
+Process ownership correction: Store package version matching is limited to Store-configured launchers in the same Windows session. A custom fixture cannot claim a production Store desktop. A prior remote fixture exposed this bug and closed the existing remote window; that window was restored through a one-time interactive task, and the task was removed. Corrected restart, incompatibility rejection, and process-ownership regressions all passed while preserving the restored desktop. Failure fixtures run the PowerShell target directly, avoiding the native wrapper's intentional error dialog. Ordinary startup never launches a second Desktop test window.
+
+
+Tool diagnostics (2026-10-23): select a chat and use 诊断此会话工具. The panel queries that loaded thread's MCP inventory, connection/authentication states and discovery failure flag without executing tools, resuming unloaded chats, or exposing MCP schemas, resources, endpoints or error payloads. Unknown backend versions fail closed. A running older bridge requires one normal Codex restart; updating the panel does not restart Codex.
+
+全局重新加载 MCP 配置 requires a fresh diagnostic and explicit acknowledgement that ALL loaded chats are affected. Confirmation expires after two minutes, is single-use, and is bound to the chat and backend PID. Native reload applies configuration changes to subsequent turns. It does not guarantee reconnection when configuration is unchanged. The panel reports accepted/queued separately from catalog visibility or successful model tool execution. It does not restore Desktop-injected tools, override browser URL checks, reauthorize SSH, enable deliberately disabled plugins, or relax permissions. Future protocol/schema incompatibilities show unavailable instead of pretending recovery succeeded.
+
+
+侧边浏览器恢复（2026-10-23）：选择会话后，优先使用“检查侧边浏览器”，再点击“重新连接此会话浏览器工具”。这是身份后端新增的 thread/browser/read 和 thread/browser/reload 接口。它只检查已加载会话里现有的 iab 配置；未加载、未配置或正在回复时拒绝重连。恢复复用当前会话的配置，通过原生 RefreshMcpServers 操作强制在后续刷新建立新连接，不依赖改写全局配置。它会重新连接该会话的 MCP 工具宿主；其他会话保持原样。身份、历史、网站授权、刻意禁用的插件和文件权限均不会被该操作修改。
+
+面板仅在收到本会话、当前后端且两分钟内的检查结果后允许重连，每个确认仅能使用一次。接口接受请求显示“已请求”，不代表页面读取已经验证成功。请在下一轮要求会话使用 Codex 右侧浏览器读取已打开页面；如果仍提示站点授权或浏览器策略错误，仍须按 Desktop 原有提示处理。旧桥接或旧原生后端会显示不支持；升级后在下一次正常启动 Codex 时加载，不会热替换正在运行的后端。
+
+重连是异步操作，提交后会短暂抑制重复请求；请稍候再发起下一轮。界面不会把“已提交”当成已经能读取页面。
+
+2026-10-26：提交后面板每 2.5 秒读取此会话浏览器宿主状态，最多等待 30 秒；会明确显示已连接、启动失败或尚未确认，禁用的旧 cua_repl 不影响判断。工具目录返回仍需下一轮实际读取页面验证。启动器会备份并修正 node_repl 指向的旧官方缓存路径，只采用与当前 Desktop 资源清单完全匹配且文件完整的运行时；自定义 MCP、身份和网站授权均保留。找不到匹配运行时时，在关闭当前 Codex 前停止启动检查，提示先打开官方 Codex 完成运行时安装。
+
+对于已有 iab 配置、浏览器说明为空、直接启动官方 node_repl 且无自定义参数的旧配置，启动器会改用同一官方运行时自带的 cua-repl 初始化入口（仅启用 browser）。旧 bundled Browser 服务文件引用会迁移为同一运行时的 @oai/browser-desktop/service，其他可信服务和授权字段保留。面板会分别提示 JavaScript 宿主连接与浏览器初始化说明是否就绪；这两项仍不证明 IAB 或页面实际可用。
+
+若实际调用返回 `Browser is not available: iab` 或浏览器清单为空，同时 Desktop 日志出现 `Timed out while fetching post-login Statsig bootstrap` 和 `bundled_plugins_reconcile_skipped_features_unavailable`，应先恢复 Desktop 官方功能配置加载。仅刷新 MCP 不能启动尚未启用的 Desktop 浏览器控制服务；不要通过强制功能开关绕过原有可用性和权限判断。
+
+当前正式版 Desktop 不提供开发版的 `Reload Window` 菜单（源码通过 `allowWindowReload: buildFlavor !== Prod` 限制）。不要把此菜单或开发版快捷键作为正式版的恢复步骤。此初始化请求失败后没有独立的界面重试入口；重新启动 Desktop 才会重新执行初始化。重启前应确认正在运行的会话已妥善处理，重启后仍须以实际读取页面标题验证浏览器恢复，不能仅凭 MCP 已连接判断成功。
+
+0.1.8 起，检测到与当前官方运行时匹配的 `unified-computer-use` / `cua_repl` 插件时，启动器保留官方工具初始化配置，不再把普通 `node_repl` 改成旧版浏览器专用入口。未安装新版插件的旧环境仍保留兼容处理；本功能不自动启用被禁用的插件。
+
+面板现在先检查仍在运行的 Desktop 的启动日志。如果官方功能配置超时且浏览器服务没有启动，面板会直接说明原因，不再提交无效的会话重连。日志缺失时显示原有工具诊断，不推断授权失效，也不自动重启 Codex。若其他会话正在运行，先妥善结束任务，再彻底退出并通过身份启动器重新打开。以后更新仍须做真实页面只读验证；此版本不保证网络超时永远不会复发。
+
+面板入口可见性修正（2026-10-23）：右侧上方始终显示“侧边浏览器”区域，先在左侧选中会话，按钮才启用。重新打开面板时，会比较前端文件版本和面板服务 PID；发生更新时仅刷新身份面板窗口，不重启 Codex。页面与服务未变则继续复用现有窗口，保留选择状态。
+# 启动兼容性修复（2026-10-26）
+
+强制切换 0.1.10：所选会话因回复、后台终端或所属子代理阻塞时，可选择“强制停止任务并切换…”。确认框会显示目标身份和操作范围。确认后先暂停活动目标，再停止当前回复、关闭所属后台终端与子代理，并继续清理本次切换出现的所属阻塞。只有后端核验目标身份生效才显示成功。保留聊天历史、文件和已完成子代理的结果；独立分叉与其他会话不受该清理影响。
+
+清理有超时和并发身份版本检查。无法停止任务、目标身份无效、鉴权或网络失败时会明确报告失败，停止自动排队，不能保证外部服务一定成功。超时后先刷新实际身份，避免连续重复强制操作。后台命令可能关联 SSH 远端脱离终端的进程，关闭本机终端并不能保证该远端进程退出。
+
+普通切换也会自动释放已经完成且没有后台终端的所属子代理，保留结果；仍有工作的子代理需要上面的显式强制确认。新原生功能在下一次正常启动身份版 Codex 后加载。
+
+身份后端及其代码工具宿主、命令运行器、沙箱程序现作为配套运行时固定并校验哈希。Codex 更新不再替换其中的宿主程序。兼容性预检会实际执行 JavaScript 和一条隔离的 PowerShell 命令，再决定是否允许重启加载；无需使用真实账号或外部模型请求。
+
+侧边浏览器重连等待超过 15 秒会显示超时并恢复按钮；超时不能证明请求未提交，应先重新检查再操作。已提交重连也不代表网站读取成功，仍需在该会话下一轮实际读取侧边浏览器页面确认。
+
+新版 Codex 增加了启动前的配置与网络策略检查。身份启动器现在将该检查原样交给当前安装的官方 CLI 执行，随后再加载支持身份切换的后端。不会伪造策略结果或跳过原有授权。
+
+每次版本组合变化时，兼容性预检也会检查这一启动步骤；失败会在停止现有 Codex 前中止。面板可单独打开，但只有身份后端已连接时才能实际切换会话身份。更新启动器文件后，请在方便时通过身份切换软件的 Codex 快捷方式正常重开；无需重复点击启动。

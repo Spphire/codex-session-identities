@@ -1,0 +1,172 @@
+diff --git a/codex-rs/app-server-protocol/src/protocol/v2/thread.rs b/codex-rs/app-server-protocol/src/protocol/v2/thread.rs
+index 60731cd..d638208 100644
+--- a/codex-rs/app-server-protocol/src/protocol/v2/thread.rs
++++ b/codex-rs/app-server-protocol/src/protocol/v2/thread.rs
+@@ -724,6 +724,18 @@ pub struct ThreadIdentityResponse {
+     pub verified: bool,
+     /// applied, busy, unloaded, or unbound.
+     pub status: String,
++    #[serde(default, skip_serializing_if = "Option::is_none")]
++    #[ts(optional)]
++    pub blocker: Option<ThreadIdentityBlocker>,
++}
++
++#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
++#[serde(rename_all = "camelCase")]
++#[ts(export_to = "v2/")]
++pub struct ThreadIdentityBlocker {
++    pub reason: String,
++    pub thread_id: String,
++    pub terminal_count: u32,
+ }
+ 
+ #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
+diff --git a/codex-rs/app-server/src/request_processors/thread_identity.rs b/codex-rs/app-server/src/request_processors/thread_identity.rs
+index 1e86a9e..7df48ab 100644
+--- a/codex-rs/app-server/src/request_processors/thread_identity.rs
++++ b/codex-rs/app-server/src/request_processors/thread_identity.rs
+@@ -1,5 +1,6 @@
+ use super::*;
+ use codex_app_server_protocol::ThreadIdentityReadParams;
++use codex_app_server_protocol::ThreadIdentityBlocker;
+ use codex_app_server_protocol::ThreadIdentityResponse;
+ use codex_app_server_protocol::ThreadIdentitySetParams;
+ use codex_login::AuthManagerConfig;
+@@ -97,23 +98,40 @@ impl ThreadRequestProcessor {
+         Ok(descendants)
+     }
+ 
+-    async fn side_chat_identity_is_busy(
++    async fn side_chat_identity_blocker(
+         &self,
+         root: ThreadId,
+-    ) -> Result<bool, JSONRPCErrorError> {
++    ) -> Result<Option<ThreadIdentityBlocker>, JSONRPCErrorError> {
+         for child in self.forked_identity_descendants(root).await? {
+             let Ok(thread) = self.thread_manager.get_thread(child).await else { continue };
+-            if matches!(thread.agent_status().await, AgentStatus::Running)
+-                || !thread.list_background_terminals().await.is_empty()
++            let terminal_count = thread.list_background_terminals().await.len() as u32;
++            let active = matches!(thread.agent_status().await, AgentStatus::Running)
+                 || matches!(
+                     self.thread_watch_manager.loaded_status_for_thread(&child.to_string()).await,
+                     ThreadStatus::Active { .. }
+-                )
+-            {
+-                return Ok(true);
++                );
++            if active || terminal_count > 0 {
++                return Ok(Some(ThreadIdentityBlocker {
++                    reason: if active { "side_chat_running" } else { "side_chat_background_terminals" }.to_string(),
++                    thread_id: child.to_string(),
++                    terminal_count,
++                }));
+             }
+         }
+-        Ok(false)
++        Ok(None)
++    }
++
++    async fn identity_busy_response(
++        &self,
++        root: ThreadId,
++        blocker: ThreadIdentityBlocker,
++    ) -> Result<ThreadIdentityResponse, JSONRPCErrorError> {
++        let mut state = self.thread_identity_read(ThreadIdentityReadParams {
++            thread_id: root.to_string(),
++        }).await?;
++        state.status = "busy".to_string();
++        state.blocker = Some(blocker);
++        Ok(state)
+     }
+ 
+     async fn synchronize_side_chat_identity(
+@@ -372,6 +390,7 @@ impl ThreadRequestProcessor {
+             identity_id: binding.as_ref().map(|b| b.identity_id.clone()),
+             revision: binding.map_or(0, |b| b.revision),
+             verified,
++            blocker: None,
+             status: if verified {
+                 "applied"
+             } else if loaded {
+@@ -457,31 +476,23 @@ impl ThreadRequestProcessor {
+                 "identity switching currently requires a persisted root thread",
+             ));
+         }
+-        if self.side_chat_identity_is_busy(id).await? {
+-            let mut state = self
+-                .thread_identity_read(ThreadIdentityReadParams {
+-                    thread_id: id.to_string(),
+-                })
+-                .await?;
+-            state.status = "busy".to_string();
+-            return Ok(state);
++        if let Some(blocker) = self.side_chat_identity_blocker(id).await? {
++            return self.identity_busy_response(id, blocker).await;
+         }
+-        if matches!(thread.agent_status().await, AgentStatus::Running)
+-            || !thread.list_background_terminals().await.is_empty()
++        let terminal_count = thread.list_background_terminals().await.len() as u32;
++        let active = matches!(thread.agent_status().await, AgentStatus::Running)
+             || matches!(
+                 self.thread_watch_manager
+                     .loaded_status_for_thread(&id.to_string())
+                     .await,
+                 ThreadStatus::Active { .. }
+-            )
+-        {
+-            let mut state = self
+-                .thread_identity_read(ThreadIdentityReadParams {
+-                    thread_id: params.thread_id,
+-                })
+-                .await?;
+-            state.status = "busy".to_string();
+-            return Ok(state);
++            );
++        if active || terminal_count > 0 {
++            return self.identity_busy_response(id, ThreadIdentityBlocker {
++                reason: if active { "reply_running" } else { "background_terminals" }.to_string(),
++                thread_id: id.to_string(),
++                terminal_count,
++            }).await;
+         }
+         for child in self
+             .thread_manager
+@@ -490,13 +501,11 @@ impl ThreadRequestProcessor {
+             .map_err(|_| internal_error("cannot inspect child runtimes"))?
+         {
+             if child != id && self.thread_manager.get_thread(child).await.is_ok() {
+-                let mut state = self
+-                    .thread_identity_read(ThreadIdentityReadParams {
+-                        thread_id: id.to_string(),
+-                    })
+-                    .await?;
+-                state.status = "busy".to_string();
+-                return Ok(state);
++                return self.identity_busy_response(id, ThreadIdentityBlocker {
++                    reason: "loaded_subagent".to_string(),
++                    thread_id: child.to_string(),
++                    terminal_count: 0,
++                }).await;
+             }
+         }
+         let settings_before = thread.thread_settings_snapshot().await;
+@@ -574,13 +583,11 @@ impl ThreadRequestProcessor {
+             .map_err(|_| internal_error("cannot drain idle thread"))?
+         {
+             thread_state.lock().await.take_shutdown_drain_waiter();
+-            let mut state = self
+-                .thread_identity_read(ThreadIdentityReadParams {
+-                    thread_id: id.to_string(),
+-                })
+-                .await?;
+-            state.status = "busy".to_string();
+-            return Ok(state);
++            return self.identity_busy_response(id, ThreadIdentityBlocker {
++                reason: "thread_became_busy".to_string(),
++                thread_id: id.to_string(),
++                terminal_count: 0,
++            }).await;
+         }
+         if !matches!(tokio::time::timeout(Duration::from_secs(10), drain).await,Ok(Ok(()))) {
+             thread_state.lock().await.take_shutdown_drain_waiter();

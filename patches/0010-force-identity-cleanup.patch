@@ -1,0 +1,199 @@
+diff --git a/codex-rs/app-server/src/request_processors/thread_identity.rs b/codex-rs/app-server/src/request_processors/thread_identity.rs
+--- a/codex-rs/app-server/src/request_processors/thread_identity.rs
++++ b/codex-rs/app-server/src/request_processors/thread_identity.rs
+@@ -7,6 +7,24 @@
+ use serde::Deserialize;
+ use serde::Serialize;
+ use tokio::io::AsyncWriteExt;
++
++async fn retain_identity_child_result(thread: &codex_core::CodexThread, child: ThreadId, status: AgentStatus) -> Result<(), JSONRPCErrorError> {
++    let message = match status {
++        AgentStatus::Completed(Some(message)) => Some(message),
++        AgentStatus::Errored(error) => Some(format!("Subagent ended with error: {error}")),
++        _ => None,
++    };
++    if let Some(message) = message {
++        thread.inject_response_items(vec![codex_protocol::models::ResponseItem::Message {
++            id: None, encrypted_content: None, status: Some("completed".to_string()), role: "assistant".to_string(),
++            content: vec![codex_protocol::models::ContentItem::OutputText {
++                annotations: None, logprobs: None,
++                text: format!("Retained result from completed subagent {child} before identity switch:\n{message}"),
++            }], phase: None, internal_chat_message_metadata_passthrough: None,
++        }]).await.map_err(|_| internal_error("cannot preserve completed subagent result; identity unchanged"))?;
++    }
++    Ok(())
++}
+ 
+ #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+ #[serde(rename_all = "camelCase", deny_unknown_fields)]
+@@ -382,18 +400,46 @@
+                 terminal_count,
+             }).await;
+         }
++        let mut completed_children = Vec::new();
+         for child in self
+             .thread_manager
+             .list_agent_subtree_thread_ids(id)
+             .await
+             .map_err(|_| internal_error("cannot inspect child runtimes"))?
+         {
+-            if child != id && self.thread_manager.get_thread(child).await.is_ok() {
++            if child != id {
++                if let Ok(child_thread) = self.thread_manager.get_thread(child).await {
++                    let child_terminals = child_thread.list_background_terminals().await.len() as u32;
++                    let child_status = child_thread.agent_status().await;
++                    let completed = matches!(child_status,
++                        AgentStatus::Completed(_) | AgentStatus::Errored(_) | AgentStatus::Shutdown);
++                    let active = matches!(self.thread_watch_manager.loaded_status_for_thread(&child.to_string()).await,
++                        ThreadStatus::Active { .. });
++                    if !completed || active || child_terminals > 0 {
++                        return self.identity_busy_response(id, ThreadIdentityBlocker {
++                            reason: "loaded_subagent".to_string(),
++                            thread_id: child.to_string(),
++                            terminal_count: child_terminals,
++                        }).await;
++                    }
++                    completed_children.push((child, child_thread, child_status));
++                }
++            }
++        }
++        // A completed worker can remain resident after its owner hits a quota
++        // error. Release only drained terminal-free workers, never live work.
++        // ShutdownIfIdle serializes with newly submitted turns; retain history.
++        for (child, child_thread, child_status) in completed_children {
++            retain_identity_child_result(&thread, child, child_status).await?;
++            if !matches!(tokio::time::timeout(Duration::from_secs(5), child_thread.shutdown_if_idle()).await, Ok(Ok(true))) {
+                 return self.identity_busy_response(id, ThreadIdentityBlocker {
+                     reason: "loaded_subagent".to_string(),
+                     thread_id: child.to_string(),
+-                    terminal_count: 0,
++                    terminal_count: child_thread.list_background_terminals().await.len() as u32,
+                 }).await;
++            }
++            if self.thread_manager.remove_thread_if_matches(&child, &child_thread).await.is_some() {
++                self.finalize_thread_teardown(child).await;
+             }
+         }
+         let settings_before = thread.thread_settings_snapshot().await;
+@@ -553,6 +599,68 @@
+ }
+ 
+ impl ThreadRequestProcessor {
++    /// Explicit, confirmed panel operation. Scope is the selected root's live
++    /// agent subtree, never ordinary independent forks or other roots.
++    pub(crate) async fn thread_identity_force_set(
++        &self,
++        request_id: ConnectionRequestId,
++        params: ThreadIdentitySetParams,
++        client_name: Option<String>,
++        client_version: Option<String>,
++    ) -> Result<ThreadIdentityResponse, JSONRPCErrorError> {
++        validate_identity_id(&params.identity_id)?;
++        let id = ThreadId::from_string(&params.thread_id).map_err(|_| invalid_params("invalid thread ID"))?;
++        let current = self.thread_identity_read(ThreadIdentityReadParams { thread_id: params.thread_id.clone() }).await?;
++        if current.verified && current.identity_id.as_ref() == Some(&params.identity_id) { return Ok(current); }
++        if current.revision != params.expected_revision { return Err(invalid_request("identity revision changed; refresh before forcing")); }
++        let Ok(thread) = self.thread_manager.get_thread(id).await else {
++            return self.thread_identity_set(request_id, params, client_name, client_version).await;
++        };
++        let snapshot = thread.config_snapshot().await;
++        if snapshot.ephemeral || snapshot.session_source.is_non_root_agent() {
++            return Err(invalid_request("forced identity switch requires a persisted root thread"));
++        }
++        // Reject an invalid target before interrupting any work.
++        let config = thread.config().await;
++        let _prepared = self.prepare_identity_runtime(config.as_ref(), &params.identity_id).await?;
++        let deadline = std::time::Instant::now() + Duration::from_secs(90);
++        for _ in 0..32 {
++            if std::time::Instant::now() >= deadline { break; }
++            let binding = self.load_identity_binding(id).await?;
++            if binding.as_ref().map_or(0, |b| b.revision) != params.expected_revision {
++                return Err(invalid_request("identity changed while forcing; cleanup stopped"));
++            }
++            if matches!(thread.agent_status().await, AgentStatus::Running) {
++                thread.submit(codex_protocol::protocol::Op::Interrupt).await.map_err(|_| internal_error("could not interrupt selected chat"))?;
++            }
++            while matches!(thread.agent_status().await, AgentStatus::Running) {
++                if std::time::Instant::now() >= deadline { return Err(internal_error("selected reply did not stop; identity not verified")); }
++                tokio::time::sleep(Duration::from_millis(50)).await;
++            }
++            for terminal in thread.list_background_terminals().await {
++                let process = terminal.process_id.parse::<i32>().map_err(|_| internal_error("invalid owned terminal reference"))?;
++                thread.terminate_background_terminal(process).await;
++            }
++            let children = self.thread_manager.list_agent_subtree_thread_ids(id).await.map_err(|_| internal_error("cannot inspect owned subagents"))?;
++            for child in children {
++                if child == id { continue; }
++                if std::time::Instant::now() >= deadline { return Err(internal_error("owned subagent cleanup deadline exceeded; identity not verified")); }
++                if let Ok(child_thread) = self.thread_manager.get_thread(child).await {
++                    retain_identity_child_result(&thread, child, child_thread.agent_status().await).await?;
++                    let remaining = deadline.saturating_duration_since(std::time::Instant::now()).min(Duration::from_secs(10));
++                    if !matches!(tokio::time::timeout(remaining, child_thread.shutdown_and_wait()).await, Ok(Ok(()))) {
++                        return Err(internal_error("owned subagent did not stop; identity not verified"));
++                    }
++                    if self.thread_manager.remove_thread_if_matches(&child, &child_thread).await.is_some() { self.finalize_thread_teardown(child).await; }
++                }
++            }
++            let result = self.thread_identity_set(request_id.clone(), params.clone(), client_name.clone(), client_version.clone()).await?;
++            if result.status != "busy" { return Ok(result); }
++            tokio::time::sleep(Duration::from_millis(100)).await;
++        }
++        Err(internal_error("forced cleanup did not converge; identity not verified; inspect remaining work"))
++    }
++
+     pub(crate) async fn thread_browser(
+         &self,
+         params: ThreadIdentityReadParams,
+diff --git a/codex-rs/app-server-protocol/src/protocol/common.rs b/codex-rs/app-server-protocol/src/protocol/common.rs
+--- a/codex-rs/app-server-protocol/src/protocol/common.rs
++++ b/codex-rs/app-server-protocol/src/protocol/common.rs
+@@ -783,6 +783,11 @@
+         params: v2::ThreadIdentitySetParams,
+         serialization: thread_id(params.thread_id),
+         response: v2::ThreadIdentitySetResponse,
++    },
++    ThreadIdentityForceSet => "thread/identity/forceSet" {
++        params: v2::ThreadIdentitySetParams,
++        serialization: thread_id(params.thread_id),
++        response: v2::ThreadIdentityForceSetResponse,
+     },
+     ThreadRevert => "thread/revert" {
+         params: v2::ThreadRevertParams,
+diff --git a/codex-rs/app-server/src/message_processor.rs b/codex-rs/app-server/src/message_processor.rs
+--- a/codex-rs/app-server/src/message_processor.rs
++++ b/codex-rs/app-server/src/message_processor.rs
+@@ -992,6 +992,7 @@
+             | ClientRequest::ThreadResume { .. }
+             | ClientRequest::ThreadRevert { .. }
+             | ClientRequest::ThreadIdentitySet { .. }
++            | ClientRequest::ThreadIdentityForceSet { .. }
+             | ClientRequest::ThreadSettingsUpdate { .. }
+             | ClientRequest::TurnSettingsUpdate { .. }
+             | ClientRequest::ThreadDelete { .. }
+@@ -1494,6 +1495,11 @@
+                 .map(|response| {
+                     Some(codex_app_server_protocol::ThreadIdentitySetResponse(response).into())
+                 }),
++            ClientRequest::ThreadIdentityForceSet { params, .. } => self
++                .thread_processor
++                .thread_identity_force_set(request_id.clone(), params, app_server_client_name.clone(), client_version.clone())
++                .await
++                .map(|response| Some(codex_app_server_protocol::ThreadIdentityForceSetResponse(response).into())),
+             ClientRequest::ThreadRevert { params, .. } => {
+                 self.thread_processor
+                     .thread_revert(
+diff --git a/codex-rs/app-server-protocol/src/protocol/v2/thread.rs b/codex-rs/app-server-protocol/src/protocol/v2/thread.rs
+--- a/codex-rs/app-server-protocol/src/protocol/v2/thread.rs
++++ b/codex-rs/app-server-protocol/src/protocol/v2/thread.rs
+@@ -744,6 +744,11 @@
+ pub struct ThreadIdentitySetResponse(pub ThreadIdentityResponse);
+ 
+ #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
++#[serde(transparent)]
++#[ts(export_to = "v2/")]
++pub struct ThreadIdentityForceSetResponse(pub ThreadIdentityResponse);
++
++#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
+ #[serde(rename_all = "camelCase")]
+ #[ts(export_to = "v2/")]
+ pub struct ThreadArchiveParams {

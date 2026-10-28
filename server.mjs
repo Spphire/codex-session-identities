@@ -12,12 +12,17 @@ import { BridgeClient } from './bridge-client.mjs';
 import { SwitchCoordinator } from './switch-coordinator.mjs';
 import { existsSync } from 'node:fs';
 import permissionControl from './execution-policy.cjs';
+import {ToolHealth,BrowserHealth} from './tool-health.mjs';
+import {inspectDesktopBrowser} from './desktop-browser-health.mjs';
+import {TerminalSwitch} from './terminal-switch.mjs';
 
 const root = dirname(fileURLToPath(import.meta.url));
 export function panelServer({ codexDirectory, switcherDirectory, originalCodexExe, officialUsageOptions, bridge:providedBridge, accessToken=randomBytes(32).toString('hex') }) {
   const login=new OfficialLogin(codexDirectory,originalCodexExe);
   const usage=new OfficialUsage(codexDirectory,officialUsageOptions);
   const bridge = providedBridge || new BridgeClient(codexDirectory);
+  const toolHealth=new ToolHealth(bridge);
+  const browserHealth=new BrowserHealth(bridge,{desktopHealth:inspectDesktopBrowser});
   let executionPolicy;
   const permissionStore=()=>executionPolicy??=new permissionControl.ExecutionPolicy(codexDirectory);
   async function permissionsView(){
@@ -26,6 +31,7 @@ export function panelServer({ codexDirectory, switcherDirectory, originalCodexEx
     return {...saved,runtimeSupported,effectiveFrom:'next-turn'};
   }
   let coordinator=existsSync(join(codexDirectory,'session-identities','panel-bindings.sqlite'))?new SwitchCoordinator(codexDirectory,bridge):null;
+  const terminalSwitch=new TerminalSwitch(bridge,()=>coordinator);
   const observed=new Map();
   let writes=Promise.resolve();
   const exclusive=operation=>{const next=writes.then(operation);writes=next.catch(()=>{});return next;};
@@ -48,6 +54,26 @@ export function panelServer({ codexDirectory, switcherDirectory, originalCodexEx
       if(supplied.length!==expected.length||!timingSafeEqual(supplied,expected)){json(401,{error:'面板访问未授权'});return;}
     }
     try {
+      if(req.method==='POST'&&['/api/switch-terminals/prepare','/api/switch-terminals/confirm'].includes(req.url)){
+        if(req.headers.origin!==`http://${host}`||!req.headers['content-type']?.startsWith('application/json')){json(403,{error:'仅接受面板内操作'});return;}
+        let body='';for await(const chunk of req){body+=chunk;if(Buffer.byteLength(body)>4096){json(413,{error:'请求过大'});return;}}
+        try{const input=JSON.parse(body);json(200,await exclusive(()=>req.url.endsWith('/prepare')?terminalSwitch.prepare(input):terminalSwitch.confirm(input)))}catch(error){json(409,{error:error.message})}return;
+      }
+      if(req.url?.startsWith('/api/tools/')||req.url?.startsWith('/api/browser/')){
+        if(req.method!=='POST'){json(405,{error:'请使用面板操作'});return;}
+        if(req.headers.origin!==`http://${host}`||!req.headers['content-type']?.startsWith('application/json')){json(403,{error:'仅接受面板内操作'});return;}
+        let body='';for await(const chunk of req){body+=chunk;if(Buffer.byteLength(body)>4096){json(413,{error:'请求过大'});return;}}
+        const input=JSON.parse(body);
+        if(req.url==='/api/browser/diagnose'){json(200,await browserHealth.diagnose(input.threadId));return;}
+        if(req.url==='/api/browser/recover'){
+          try{json(200,await exclusive(()=>browserHealth.recover(input)));}catch(error){json(409,{error:error.message});}return;
+        }
+        if(req.url==='/api/tools/diagnose'){json(200,await toolHealth.diagnose(input.threadId));return;}
+        if(req.url==='/api/tools/recover'){
+          try{json(200,await exclusive(()=>toolHealth.recover(input)));}catch(error){json(409,{error:error.message});}return;
+        }
+        json(404,{error:'未知操作'});return;
+      }
       if(req.url==='/api/permissions'&&req.method==='GET'){json(200,await permissionsView());return;}
       if(req.url==='/api/permissions'&&req.method==='POST'){
         if(req.headers.origin!==`http://${host}`||!req.headers['content-type']?.startsWith('application/json')){json(403,{error:'仅接受面板内操作'});return;}

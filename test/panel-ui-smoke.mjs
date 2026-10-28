@@ -31,6 +31,9 @@ try{
   const page=await browser.newPage();const errors=[];page.on('pageerror',error=>errors.push(error.message));
   await page.goto(`http://127.0.0.1:${server.address().port}/#access=${server.identityAccessToken}`);
   await page.waitForFunction(()=>document.querySelectorAll('#identities li').length===2);
+  assert.equal(await page.locator('#diagnose-browser').isVisible(),true,'Sidebar browser entry is visible before selecting a chat');
+  assert.equal(await page.locator('#diagnose-browser').isDisabled(),true);
+  assert.ok(await page.locator('#diagnose-browser').evaluate(el=>el.getBoundingClientRect().bottom<=innerHeight),'Sidebar browser entry must be above the fold');
   await page.waitForFunction(()=>!document.querySelector('#yolo').disabled);
   assert.equal(await page.getByRole('switch',{name:'YOLO',exact:true}).isChecked(),true);
   await page.getByRole('switch',{name:'YOLO',exact:true}).uncheck();
@@ -59,6 +62,86 @@ try{
   await page.locator('#search').fill('no-fixture-match');assert.equal(await page.locator('#rows tr').count(),0);
   await page.locator('#search').fill('');assert.equal(await page.locator('#rows tr').count(),1);
   assert.equal(await page.evaluate(()=>fixtureRow===document.querySelector('#rows tr')),true,'Filtered rows must be reusable');
+  const related='22222222-2222-4222-8222-222222222222';
+  let wait={reason:'background_terminals',threadId:id,terminalCount:1};
+  let forceConfirmations=0,forcePrepares=0,fullForce=false,pending=true,finishForce;
+  await page.route('**/api/switch-terminals/prepare',route=>{forcePrepares++;return route.fulfill({json:{threadId:id,confirmation:'force-ticket',allOwned:fullForce,reason:wait?.reason,relatedThreadId:related,count:fullForce?0:1,terminals:fullForce?[]:[{processId:'10',osPid:100,cpuPercent:0}],warning:fullForce?'暂停目标、停止回复并清理所属子代理及后台终端，直到身份核验完成。':'会终止此会话的命令及子进程，不关闭分叉会话。'}})});
+  await page.route('**/api/switch-terminals/confirm',async route=>{assert.equal(route.request().postDataJSON().threadId,id);forceConfirmations++;if(fullForce){await new Promise(r=>{finishForce=r});pending=false;await route.fulfill({json:{status:'applied',verified:true}})}else await route.fulfill({json:{status:'retrying',terminated:1,remaining:0}})});
+  await page.route('**/api/state',async route=>{const response=await route.fetch();const value=await response.json();value.runtime={...value.runtime,connected:true,canSwitch:true};await route.fulfill({json:value});});
+  await page.route('**/api/identity?*',route=>route.fulfill({json:{threadId:id,identityId:pending?'official':'gateway',revision:1,verified:true,status:'applied',queue:{pending,desiredIdentityId:'gateway',desiredRevision:1,inflight:false,wait:pending?wait:null}}}));
+  await page.getByRole('button',{name:'刷新',exact:true}).click();await page.waitForFunction(()=>!document.querySelector('#refresh').disabled);
+  await page.locator('#rows tr').click();
+  await page.waitForFunction(()=>document.querySelector('#switch-reason').textContent.includes('暂停目标不会结束后台命令'));
+  assert.equal(await page.locator('#switch-related').isHidden(),true);
+  await page.locator('#force-dialog').waitFor({state:'visible'});
+  assert.equal(forceConfirmations,0);
+  await page.getByRole('button',{name:'继续等待，不关闭任务',exact:true}).click();
+  assert.equal(forceConfirmations,0);
+  await page.locator('#force-switch').click();await page.locator('#force-dialog').waitFor({state:'visible'});
+  for(const [name,width,height] of [['desktop',1365,900],['mobile',390,844]]){
+    await page.setViewportSize({width,height});await page.screenshot({path:join(output,`force-dialog-${name}.png`),fullPage:true});
+    assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),'Confirmation dialog overflows viewport');
+  }
+  const forceResponse=page.waitForResponse(response=>response.url().endsWith('/api/switch-terminals/confirm'));
+  await page.getByRole('button',{name:'确认强制停止并完成切换',exact:true}).click();await forceResponse;
+  await page.waitForFunction(()=>!document.querySelector('#force-dialog').open);
+  assert.equal(forceConfirmations,1);assert.equal(forcePrepares,2);
+  await page.route('**/api/browser/diagnose',route=>route.fulfill({json:{threadId:id,status:'ready',message:'已有侧边浏览器配置',confirmation:'browser-ticket'}}));
+  let browserReloads=0;
+  await page.route('**/api/browser/recover',async route=>{assert.equal(route.request().postDataJSON().threadId,id);browserReloads++;await route.fulfill({json:{threadId:id,status:'queued',message:'已请求重新连接此会话的工具宿主'}});});
+  assert.equal(await page.locator('#recover-browser').isDisabled(),true);
+  await page.locator('#diagnose-browser').click();await page.waitForFunction(()=>!document.querySelector('#recover-browser').disabled);
+  await page.locator('#recover-browser').click();await page.waitForFunction(()=>document.querySelector('#browser-message').textContent.includes('已请求重新连接'));
+  assert.equal(browserReloads,1);assert.equal(await page.locator('#recover-browser').isDisabled(),true);
+  await page.waitForFunction(()=>document.querySelector('#browser-message').textContent.includes('已有侧边浏览器配置'));
+  assert.equal(browserReloads,1,'Polling reads status without submitting a second reconnect');
+  // A hung HTTP request must release the UI without claiming recovery succeeded.
+  await page.clock.install();let hungBrowserRoute;
+  await page.route('**/api/browser/recover',route=>{hungBrowserRoute=route;});
+  await page.locator('#diagnose-browser').click();await page.waitForFunction(()=>!document.querySelector('#recover-browser').disabled);
+  await page.locator('#recover-browser').click();
+  await page.waitForFunction(()=>document.querySelector('#browser-message').textContent.includes('正在提交'));
+  await page.clock.runFor(15100);
+  await page.waitForFunction(()=>document.querySelector('#browser-message').textContent.includes('等待超时'));
+  assert.equal(await page.locator('#diagnose-browser').isDisabled(),false);
+  assert.equal(await page.locator('#recover-browser').isDisabled(),true);
+  await hungBrowserRoute?.abort().catch(()=>{});await page.clock.resume();
+  await page.locator('#advanced-tools summary').click();
+  let reloads=0;
+  await page.route('**/api/tools/diagnose',route=>route.fulfill({json:{threadId:id,status:'observed',message:'已读取目录',confirmation:'synthetic-confirmation',servers:[{name:'fixture',runtimeStatus:'connected',toolCount:1}]}}));
+  await page.route('**/api/tools/recover',async route=>{const body=route.request().postDataJSON();assert.equal(body.scope,'all-loaded-threads');assert.equal(body.threadId,id);reloads++;await route.fulfill({json:{threadId:id,status:'queued',message:'后端已接受全局 MCP 刷新；尚未验证工具调用成功',report:{threadId:id,status:'observed',servers:[]}}});});
+  await page.locator('#diagnose-tools').click();await page.waitForFunction(()=>document.querySelector('#tool-message').textContent==='已读取目录');
+  assert.equal(await page.locator('#recover-tools').isDisabled(),true);
+  await page.locator('#tool-global-consent').check();assert.equal(await page.locator('#recover-tools').isDisabled(),false);
+  await page.locator('#recover-tools').click();await page.waitForFunction(()=>document.querySelector('#tool-message').textContent.includes('尚未验证'));
+  assert.equal(reloads,1);assert.equal(await page.locator('#recover-tools').isDisabled(),true);assert.equal(await page.locator('#tool-global-consent').isChecked(),false);
+
+  wait={reason:'side_chat_background_terminals',threadId:related,terminalCount:2};
+  await page.waitForFunction(()=>document.querySelector('#switch-reason').textContent.includes('侧边聊天有 2 个后台命令'));
+  assert.equal(await page.locator('#switch-related').getAttribute('href'),`codex://threads/${related}`);
+  wait={reason:'loaded_subagent',threadId:related,terminalCount:0};
+  await page.waitForFunction(()=>document.querySelector('#switch-reason').textContent.includes('子智能体仍加载'));
+  fullForce=true;
+  await page.locator('#force-switch').click();await page.locator('#force-dialog').waitFor({state:'visible'});
+  assert.match(await page.locator('#force-title').innerText(),/强制停止/);
+  assert.match(await page.locator('#force-terminals').innerText(),new RegExp(related));
+  for(const [name,width,height] of [['desktop',1365,900],['mobile',390,844]]){
+    await page.setViewportSize({width,height});await page.screenshot({path:join(output,`force-owned-${name}.png`),fullPage:true});
+    assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),'Full force dialog overflows viewport');
+  }
+  await page.getByRole('button',{name:'确认强制停止并完成切换',exact:true}).click();
+  await page.waitForFunction(()=>document.querySelector('#switch-reason').textContent.includes('清理阻塞'));
+  assert.equal(await page.locator('#cancel-switch').isDisabled(),true);
+  while(!finishForce)await new Promise(r=>setTimeout(r,10));
+  finishForce();await page.waitForFunction(()=>document.querySelector('#switch-reason').textContent==='已生效');
+  assert.equal(forceConfirmations,2);
+  pending=true;fullForce=false;
+  wait={reason:'backend_busy',threadId:null,terminalCount:0};
+  await page.waitForFunction(()=>document.querySelector('#switch-reason').textContent.includes('未提供具体原因'));
+  wait=null;
+  await page.waitForFunction(()=>document.querySelector('#switch-reason').textContent.includes('正在检查并切换'));
+  wait={reason:'background_terminals',threadId:id,terminalCount:1};
+  await page.waitForFunction(()=>document.querySelector('#switch-reason').textContent.includes('暂停目标不会结束后台命令'));
   for(const [name,width,height] of [['desktop',1365,900],['mobile',390,844]]){
     await page.setViewportSize({width,height});
     await page.screenshot({path:join(output,`${name}.png`),fullPage:true});
@@ -70,7 +153,7 @@ try{
   await page.waitForFunction(()=>document.querySelectorAll('#identities li').length===1);
   await page.reload();await page.waitForFunction(()=>document.querySelectorAll('#identities li').length===1);
   assert.deepEqual(errors,[]);
-  console.log(JSON.stringify({passed:true,yoloTogglePersists:true,officialUsage:true,deduplicated:true,usedRemovalDisabled:true,unusedRemovalPersists:true,desktopMobile:true}));
+  console.log(JSON.stringify({passed:true,switchBlockerReasons:true,relatedThreadLink:true,legacyBackendFallback:true,yoloTogglePersists:true,officialUsage:true,deduplicated:true,usedRemovalDisabled:true,unusedRemovalPersists:true,desktopMobile:true}));
 }finally{
   await browser?.close();await new Promise(resolve=>server.close(resolve));rmSync(home,{recursive:true,force:true});
 }

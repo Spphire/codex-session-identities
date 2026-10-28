@@ -110,7 +110,8 @@ try {
   assert.ok(requests.some(x=>x.label==='b' && x.authorization==='Bearer synthetic-b'));
   const held=await turn(first,'hold_identity_test');
   await waitUntil(()=>Boolean(releaseTurn),'held endpoint request');
-  assert.equal((await set(first,'b',1)).status,'busy');
+  const blocked=await set(first,'b',1);assert.equal(blocked.status,'busy');
+  assert.equal(blocked.blocker.reason,'reply_running');assert.equal(blocked.blocker.threadId,first);
   await (await turn(second,'other_session_continues'))();
   releaseTurn();await held();
   assert.equal((await set(first,'b',1)).status,'applied');

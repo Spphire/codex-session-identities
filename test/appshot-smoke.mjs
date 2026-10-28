@@ -41,7 +41,7 @@ try{
     await writeFile(join(profile,'profile.json'),JSON.stringify({kind:'api',providerId:`pinned_${id}`,provider:{name:id,base_url:base,wire_api:'responses',experimental_bearer_token:`synthetic-${id}`,requires_openai_auth:false,supports_websockets:false}}));
   }
   // An isolated bridge config avoids production accounts and installed runtime mutation.
-  for(const name of ['runtime-bridge.cjs','model-catalog-compat.cjs','client-version-compat.cjs'])await copyFile(new URL(`../${name}`,import.meta.url),join(home,name));
+  for(const name of ['runtime-bridge.cjs','model-catalog-compat.cjs','client-version-compat.cjs','feature-config-compat.cjs'])await copyFile(new URL(`../${name}`,import.meta.url),join(home,name));
   await writeFile(join(home,'runtime-config.json'),JSON.stringify({appServerExe:executable}));
   const env={...process.env,CODEX_HOME:home,RUST_MIN_STACK:'33554432',NO_PROXY:'127.0.0.1,localhost,::1',no_proxy:'127.0.0.1,localhost,::1'};
   for(const key of ['OPENAI_API_KEY','CODEX_ACCESS_TOKEN','CODEX_API_KEY'])delete env[key];

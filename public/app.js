@@ -4,6 +4,87 @@ acceptAccess();
 const apiFetch=(url,options={})=>fetch(url,{...options,headers:{...options.headers,'X-Codex-Identity-Access':sessionStorage.getItem('identity-panel-access')||''}});
 let state = null;
 let selected = null;
+let browserReport=null;let browserBusy=false;let browserGeneration=0;let browserRecovering=false;
+let forceBusy=false,forceExecuting=false;const forceOffered=new Set();
+async function offerForceSwitch(value,manual=false){
+  const id=selected,q=value?.queue;
+  if(forceBusy||!id||!q?.pending||!['background_terminals','loaded_subagent','reply_running','thread_became_busy'].includes(q.wait?.reason)||(q.wait.reason!=='loaded_subagent'&&q.wait.threadId!==id))return;
+  const key=`${id}:${q.desiredRevision}:${q.runtimeId}`;
+  if(!manual&&forceOffered.has(key))return;
+  forceOffered.add(key);forceBusy=true;
+  try{
+    const post=async(action,body)=>{const controller=new AbortController();const timer=setTimeout(()=>controller.abort(),action==='confirm'?165000:15000);try{const r=await apiFetch('/api/switch-terminals/'+action,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body),signal:controller.signal});const v=await r.json();if(!r.ok)throw new Error(v.error);return v;}catch(error){if(controller.signal.aborted)throw new Error('操作等待超时，结果尚未核实。请刷新状态，不要连续重复强制操作。');throw error}finally{clearTimeout(timer)}};
+    const prepared=await post('prepare',{threadId:id,expectedDesiredRevision:q.desiredRevision});
+    if(selected!==id)return;
+    const row=state.sessions.find(r=>r.id===id);
+    $('force-title').textContent=prepared.allOwned?`是否强制停止“${row?.title||id}”的任务并切换身份？`:`是否关闭“${row?.title||id}”的后台终端并切换身份？`;
+    $('force-summary').textContent=`切换到 ${identityName(q.desiredIdentityId)}。${prepared.warning}`;
+    $('force-terminals').textContent=(prepared.reason==='loaded_subagent'?`阻塞子代理：${prepared.relatedThreadId}\n`:'')+prepared.terminals.map(t=>`终端 ${t.processId}${t.osPid?` · 系统 PID ${t.osPid}`:''}${Number.isFinite(t.cpuPercent)?` · CPU ${t.cpuPercent}%`:''}`).join('\n');
+    const dialog=$('force-dialog');dialog.returnValue='wait';dialog.showModal();
+    await new Promise(resolve=>dialog.addEventListener('close',resolve,{once:true}));
+    if(dialog.returnValue!=='force'||selected!==id)return;
+    forceExecuting=true;renderDetail();
+    const result=await post('confirm',{threadId:id,confirmation:prepared.confirmation});
+    $('switch-reason').textContent=result.status==='applied'&&result.verified?'新身份已核验生效。':result.status==='retrying'?'后台终端已处理，正在重新验证身份切换。':'仍有阻塞，身份尚未确认切换。';
+    await loadIdentity();
+  }catch(error){$('error').textContent=error.message;$('error').hidden=false;}
+  finally{forceBusy=false;forceExecuting=false;renderDetail();}
+}
+let browserPoll=null;let browserPollUntil=0;
+function renderBrowser(){
+  const report=browserReport?.threadId===selected?browserReport:null;
+  $('diagnose-browser').disabled=browserBusy||!selected;
+  $('recover-browser').disabled=browserBusy||report?.status!=='ready'||!report.confirmation;
+  $('browser-message').textContent=browserBusy?(browserRecovering?'正在提交浏览器重连请求…':'正在检查侧边浏览器…'):report?.message||(selected?'已选择会话，可检查侧边浏览器工具。':'先在左侧选择一个会话。');
+}
+async function browserAction(recover){
+  const id=selected;const report=browserReport;if(browserBusy||!id)return;
+  clearTimeout(browserPoll);
+  if(recover)browserPollUntil=Date.now()+30000;
+  const generation=++browserGeneration;browserBusy=true;browserRecovering=recover;renderBrowser();
+  const controller=new AbortController();const timeout=setTimeout(()=>controller.abort(),15000);
+  try{
+    const response=await apiFetch('/api/browser/'+(recover?'recover':'diagnose'),{method:'POST',signal:controller.signal,headers:{'Content-Type':'application/json'},body:JSON.stringify({threadId:id,...recover?{confirmation:report?.confirmation}:{}})});
+    const value=await response.json();if(!response.ok)throw new Error(value.error||'侧边浏览器操作失败');
+    if(selected===id&&generation===browserGeneration)browserReport=value;
+  }catch(error){if(selected===id&&generation===browserGeneration)browserReport={threadId:id,status:'unavailable',message:controller.signal.aborted?(recover?'重连请求等待超时，是否已提交尚未确认。请先重新检查，勿连续重连。':'检查超时，请确认身份后端已连接后再试。'):error.message};}
+  finally{clearTimeout(timeout);if(generation===browserGeneration){browserBusy=false;renderBrowser();
+    if(selected===id&&['queued','reconnecting'].includes(browserReport?.status)){
+      if(!browserPollUntil)browserPollUntil=Date.now()+30000;
+      if(Date.now()<browserPollUntil)browserPoll=setTimeout(()=>{if(selected===id&&generation===browserGeneration)void browserAction(false);},2500);
+      else{browserReport={...browserReport,status:'unavailable',confirmation:null,message:'等待工具宿主超过 30 秒，尚未确认恢复。可重新检查状态，无需重复提交重连。'};browserPollUntil=0;renderBrowser();}
+    }else browserPollUntil=0;
+  }}
+}
+$('diagnose-browser').addEventListener('click',()=>void browserAction(false));
+$('recover-browser').addEventListener('click',()=>void browserAction(true));
+let toolReport=null;let toolsBusy=false;let toolsGeneration=0;
+function renderTools(){
+  const report=toolReport?.threadId===selected?toolReport:null;
+  $('diagnose-tools').disabled=toolsBusy||!selected;
+  $('recover-tools').disabled=toolsBusy||report?.status!=='observed'||!report.confirmation||!$('tool-global-consent').checked;
+  $('tool-message').textContent=toolsBusy?'正在检查，请稍候…':report?.message||'读取 MCP 目录，不执行工具。';
+  $('tool-servers').replaceChildren();
+  const names={notStarted:'未启动',starting:'连接中',connected:'已连接',authenticationRequired:'需要授权',failed:'连接失败',cancelled:'已取消',disabled:'已禁用',unknown:'连接状态未返回'};
+  for(const server of report?.servers||[])$('tool-servers').append(element('li',`${server.name}：${names[server.runtimeStatus]||'状态未知'} · ${server.toolCount} 个工具${server.authStatus==='notLoggedIn'?' · 未登录':''}${server.discoveryFailed?' · 工具发现失败':''}`));
+  if(report?.status==='observed'&&!report.servers.length)$('tool-servers').append(element('li','当前返回的 MCP 目录为空；不能据此判断桌面工具是否缺失。'));
+}
+async function toolsAction(recover){
+  const id=selected;const report=toolReport;
+  if(toolsBusy||!id)return;
+  const generation=++toolsGeneration;
+  toolsBusy=true;renderTools();
+  try{
+    const response=await apiFetch('/api/tools/'+(recover?'recover':'diagnose'),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(recover?{threadId:id,confirmation:report?.confirmation,scope:'all-loaded-threads'}:{threadId:id})});
+    const value=await response.json();if(!response.ok)throw new Error(value.error||'工具操作失败');
+    if(selected!==id||generation!==toolsGeneration)return;
+    toolReport=recover?{...value.report,message:value.message,confirmation:null}:value;
+  }catch(error){if(selected===id&&generation===toolsGeneration)toolReport={threadId:id,status:'unavailable',message:error.message};}
+  finally{if(generation===toolsGeneration){toolsBusy=false;$('tool-global-consent').checked=false;renderTools();}}
+}
+$('diagnose-tools').addEventListener('click',()=>void toolsAction(false));
+$('recover-tools').addEventListener('click',()=>void toolsAction(true));
+$('tool-global-consent').addEventListener('change',renderTools);
 let refreshing = false;
 let identityDetail = null;
 let submitting = false;
@@ -85,15 +166,30 @@ async function refreshUsage(manual=false){
 function renderDetail() {
   const row = state?.sessions.find(x => x.id === selected);
   $('detail').hidden = !row; $('no-selection').hidden = Boolean(row);
+  renderTools();renderBrowser();
   if (!row) return;
   $('detail-title').textContent=row.title; $('detail-id').textContent=row.id;
   $('detail-cwd').textContent=row.cwd; $('detail-model').textContent=row.model || '未记录';
   const current=identityDetail?.threadId===row.id?identityDetail:null;
   $('detail-identity').textContent=current?`${identityName(current.identityId)}${current.identityId&&!current.verified?(current.status==='unloaded'?'（未加载）':'（待核验）'):''}`:rowIdentity(row);
   const pending=current?.queue?.pending&&!current.queue.errorCode;
+  const wait=pending?current.queue.wait:null;
   $('switch').disabled=submitting||!state.runtime.connected||!current||!$('identity').value||Boolean(pending);
-  $('cancel-switch').hidden=!pending;$('cancel-switch').disabled=submitting||Boolean(current?.queue?.inflight);
-  $('switch-reason').textContent=!state.runtime.connected?state.runtime.reason:pending?`等待切换到 ${identityName(current.queue.desiredIdentityId)}`:current?.queue?.errorCode==='cancelled'?'已取消等待':current?.queue?.errorCode?'上次切换失败，当前身份未确认改变':current?.verified?'已生效':current?.identityId&&current?.status==='unloaded'?'已设置，打开会话后生效':'';
+  $('cancel-switch').hidden=!pending;$('cancel-switch').disabled=submitting||forceExecuting||Boolean(current?.queue?.inflight);
+  $('force-switch').hidden=!(pending&&['background_terminals','loaded_subagent','reply_running','thread_became_busy'].includes(wait?.reason)&&(wait.reason==='loaded_subagent'||wait.threadId===row.id));$('force-switch').disabled=forceBusy||submitting;
+  const reasons={
+    reply_running:'当前会话仍在回复，结束后自动重试。',
+    background_terminals:`当前会话有${wait?.terminalCount?' '+wait.terminalCount+' 个':''}后台命令仍在运行。暂停目标不会结束后台命令；请检查该会话的后台终端。`,
+    side_chat_running:'旧版后端仍将分叉身份联动，因此正在等待分叉回复结束。新版已改为独立身份；请正常重启 Codex 加载修复。',
+    side_chat_background_terminals:`侧边聊天有${wait?.terminalCount?' '+wait.terminalCount+' 个':''}后台命令仍在运行。旧版后端会连带等待；新版已改为独立身份，请正常重启 Codex 加载修复。`,
+    loaded_subagent:'子智能体仍加载在后端中；请先结束或关闭该子任务。',
+    thread_became_busy:'准备切换时会话重新变忙，空闲后自动重试。',
+    backend_busy:'后端报告忙碌，但未提供具体原因。可检查后台终端、侧边聊天和子任务；更新后端并重启一次可显示详细原因。',
+  };
+  const waitingText=wait?`等待切换到 ${identityName(current.queue.desiredIdentityId)}。${reasons[wait.reason]||reasons.backend_busy}`:`正在检查并切换到 ${identityName(current?.queue?.desiredIdentityId)}`;
+  $('switch-reason').textContent=forceExecuting?'正在停止所选会话的任务、清理阻塞并核验新身份，请等待结果…':!state.runtime.connected?state.runtime.reason:pending?waitingText:current?.queue?.errorCode==='cancelled'?'已取消等待':current?.queue?.errorCode?'上次切换失败，当前身份未确认改变':current?.verified?'已生效':current?.identityId&&current?.status==='unloaded'?'已设置，打开会话后生效':'';
+  const related=$('switch-related');related.hidden=!wait?.threadId||wait.threadId===row.id;
+  if(!related.hidden)related.href=`codex://threads/${wait.threadId}`;
 }
 function renderRows() {
   if (!state) return;
@@ -114,7 +210,7 @@ function renderRows() {
       entry={tr,title,provider:element('td',row.provider,'provider'),identity:element('td','','unknown'),date:element('td','','date')};
       tr.append(first,entry.provider,entry.identity,entry.date);
       const id=row.id;
-      const choose=()=>{selected=id;identityDetail=null;clearTimeout(identityPollTimer);renderRows();renderDetail();void loadIdentity();};
+      const choose=()=>{selected=id;identityDetail=null;browserReport=null;browserBusy=false;browserGeneration++;toolReport=null;toolsBusy=false;toolsGeneration++;$('tool-global-consent').checked=false;clearTimeout(identityPollTimer);renderRows();renderDetail();void loadIdentity();};
       tr.addEventListener('click',choose);tr.addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();choose();}});
       rowCache.set(id,entry);
     }
@@ -207,7 +303,7 @@ async function loadIdentity(){
     const response=await apiFetch(`/api/identity?threadId=${encodeURIComponent(id)}`);const value=await response.json();if(!response.ok)throw new Error(value.error);
     if(selected!==id)return;identityDetail=value;
     const row=state.sessions.find(x=>x.id===id);if(row){row.identityId=value.identityId;row.identityState=value.verified?'verified':'unverified';}
-    renderRows();renderDetail();
+    renderRows();renderDetail();void offerForceSwitch(value);
     if(!document.hidden&&value.queue?.pending&&!value.queue.errorCode)identityPollTimer=setTimeout(()=>void loadIdentity(),400);
   }catch(error){if(selected===id){identityDetail=null;renderDetail();$('switch-reason').textContent=error.message;}}
 }
@@ -221,6 +317,7 @@ async function mutate(cancel=false){
   finally{submitting=false;renderDetail();}
 }
 $('identity').addEventListener('change',renderDetail);$('switch').addEventListener('click',()=>mutate());$('cancel-switch').addEventListener('click',()=>mutate(true));
+$('force-switch').addEventListener('click',()=>offerForceSwitch(identityDetail,true));
 $('refresh-usage').addEventListener('click',()=>refreshUsage(true));
 $('search').addEventListener('input',renderRows); $('provider').addEventListener('change',renderRows); $('archived').addEventListener('change',renderRows); $('refresh').addEventListener('click',refresh);
 setInterval(()=>{if(!document.hidden)void refresh();},5000);refresh();

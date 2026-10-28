@@ -24,9 +24,9 @@ try{
   assert.equal((await call('thread/identity/read',{threadId:side})).identityId,'a');
   const switched=await call('thread/identity/set',{threadId:root,identityId:'b',expectedRevision:1});
   const sideAfter=await call('thread/identity/read',{threadId:side});
-  assert.equal(switched.identityId,'b');assert.equal(sideAfter.identityId,'b','existing side chat must follow parent identity');
+  assert.equal(switched.identityId,'b');assert.equal(sideAfter.identityId,'a','ordinary fork keeps its inherited identity independently');
   await call('thread/resume',{threadId:side,excludeTurns:true});assert.equal((await call('thread/identity/read',{threadId:side})).verified,true);
   const started=await call('turn/start',{threadId:side,input:[{type:'text',text:'side identity check'}]});const deadline=Date.now()+30000;while(!events.some(x=>x.method==='turn/completed'&&x.params?.threadId===side&&x.params?.turn?.id===started.turn.id)){if(Date.now()>deadline)throw new Error('side chat turn timed out');await new Promise(resolve=>setTimeout(resolve,25));}
-  assert.equal(requests.at(-1).authorization,'Bearer synthetic-b');
+  assert.equal(requests.at(-1).authorization,'Bearer synthetic-a');
   console.log(JSON.stringify({passed:true,root,side,rootIdentity:switched.identityId,sideIdentity:sideAfter.identityId,sideRequestAuthorizationMatched:true}));
 }finally{if(child){child.stdin.end();if(child.exitCode===null){const killer=setTimeout(()=>child.kill(),5000);await once(child,'exit').catch(()=>{});clearTimeout(killer);}}if(server){server.closeAllConnections();await new Promise(resolve=>server.close(resolve));}await rm(home,{recursive:true,force:true,maxRetries:20,retryDelay:250});}

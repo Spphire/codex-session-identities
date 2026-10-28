@@ -1,5 +1,34 @@
 # Changelog
 
+## 0.1.10 - 2026-10-28
+
+- Release completed owned subagents before an ordinary identity switch, retaining their result in the parent context and keeping their saved history.
+- Extend explicit force confirmation to active replies and owned subagents. Pause active goals, stop the selected chat's reply and background terminals, close its owned subagents, then retry and verify the requested identity. Independent forks remain independent.
+- Report success only after native identity verification. Failed cleanup stops automatic retries with an explicit error; a stale selection or changed backend requires a fresh confirmation.
+- Gate the new bridge methods on a paired native runtime capability, including strict pause-only goal control. Existing running backends require normal restart to load it.
+
+## 0.1.9 - 2026-10-27
+
+- Prompt once when a selected chat's identity switch is blocked by its own background terminals, with a manual retry button and explicit terminal-closure confirmation.
+- Bind each short-lived one-use confirmation to the pending identity revision, backend process and exact terminal inventory; recheck native busy reasons and preserve sibling chats. Never force a switch during an active reply.
+- Expose strictly validated per-chat terminal list/terminate bridge methods. Older running bridges explain that a normal confirmed restart is needed instead of pretending terminal management is available.
+
+## 0.1.8 - 2026-10-26
+
+- Preserve the current Desktop's official `cua_repl` browser plugin instead of replacing plain `node_repl` with the legacy browser-only bootstrap. Keep runtime path migration constrained to the matching official manifest.
+- Inspect live Desktop startup evidence before offering per-chat browser recovery. Explain feature-bootstrap timeouts and withhold ineffective reload confirmations when the browser control service never started.
+- Include the diagnostic module in panel updates and release payloads. A connected MCP catalog remains distinct from a verified page read.
+
+## Unreleased
+
+- Add per-bridge JSONL diagnostics with startup, control-pipe, request completion, response timeout, backend stderr/exit and ten-second heartbeat events. Add a bridge health command that reports stale descriptors, unreachable pipes and duplicate desktop bridges.
+- Repair a retained standard-permission panel service before connecting to an Administrator backend. Check the installation executable, server command and process creation time before replacing only the panel service; preserve already elevated services and unrelated processes.
+- Preserve the typed ephemeral flag when preparing an inherited identity. Temporary title/description forks stay temporary and do not acquire durable side-chat bindings on later parent identity changes.
+- Add isolated legacy/paginated regressions for temporary fork routing, repeated rename description refreshes, database/list exclusion, binding exclusion and ordinary side-chat synchronization. Include the previously omitted fork parent initializer in patch 5 so the seven-patch series replays exactly.
+- Explain queued identity switches using backend-confirmed reply, background terminal, side-chat, loaded subagent and idle-race blockers. Include the related thread and terminal count without commands or outputs.
+- Keep blockers scoped to the queued revision and backend process; clear them on completion, cancellation or runtime replacement. Older backends show an explicit generic busy reason.
+- Add a sixth replayable backend patch and regressions for paused goals with surviving monitor commands, UI reason/link rendering and queue lifecycle cleanup.
+
 ## 0.1.7 - 2026-10-15
 
 - Add an explicit Administrator shortcut and `--admin` launcher option using Windows UAC, same-user checks and backend process-token verification.

@@ -3,7 +3,6 @@ import assert from 'node:assert/strict';
 import {createServer} from 'node:http';
 import {once} from 'node:events';
 import {mkdtemp, mkdir, readFile, writeFile, copyFile, readdir} from 'node:fs/promises';
-import {readFileSync} from 'node:fs';
 import {tmpdir, cpus} from 'node:os';
 import {join, resolve, dirname} from 'node:path';
 import {fileURLToPath} from 'node:url';
@@ -12,6 +11,7 @@ import {createHash} from 'node:crypto';
 import {StdioClient} from '../stdio-client.mjs';
 import {BridgeClient} from '../bridge-client.mjs';
 import {SwitchCoordinator} from '../switch-coordinator.mjs';
+import runtimeCompanions from '../runtime-companions.cjs';
 
 const installation=resolve(process.argv[2]||'.');
 const output=resolve(process.argv[3]||'performance-result.json');
@@ -42,8 +42,8 @@ const server=createServer(async(req,res)=>{
 server.listen(0,'127.0.0.1');await once(server,'listening');
 const base=`http://127.0.0.1:${server.address().port}/v1`;
 const bridgeDirectory=join(directory,'adapter');await mkdir(bridgeDirectory);
-for(const name of ['runtime-bridge.cjs','client-version-compat.cjs','model-catalog-compat.cjs','stdio-client.mjs'])await copyFile(join(root,name),join(bridgeDirectory,name));
-await writeFile(join(bridgeDirectory,'runtime-config.json'),JSON.stringify({appServerExe:config.appServerExe,originalCodexExe:config.originalCodexExe}));
+for(const name of ['runtime-bridge.cjs','runtime-companions.cjs','client-version-compat.cjs','feature-config-compat.cjs','model-catalog-compat.cjs','stdio-client.mjs'])await copyFile(join(root,name),join(bridgeDirectory,name));
+await writeFile(join(bridgeDirectory,'runtime-config.json'),JSON.stringify({appServerExe:config.appServerExe,originalCodexExe:config.originalCodexExe,backendRuntimeManifest:config.backendRuntimeManifest}));
 const env={...process.env,CODEX_IDENTITY_CLIENT_VERSION:'0.162.0-alpha.17.2',NO_PROXY:'127.0.0.1,localhost,::1',no_proxy:'127.0.0.1,localhost,::1',RUST_MIN_STACK:'33554432'};
 for(const key of ['CODEX_ACCESS_TOKEN','CODEX_API_KEY','OPENAI_API_KEY','OPENAI_BASE_URL','HTTP_PROXY','HTTPS_PROXY','ALL_PROXY','http_proxy','https_proxy','all_proxy'])delete env[key];
 const homes=new Map();
@@ -83,12 +83,7 @@ const report={date:new Date().toISOString(),node:process.version,cpu:cpus()[0].m
   backendSha256:createHash('sha256').update(await readFile(config.appServerExe)).digest('hex'),samples,isolated:true,synthetic:true,modes:{}};
 try{
   report.installedVersionProbe=await measured(()=>execFileSync(config.originalCodexExe,['--version'],{encoding:'utf8',windowsHide:true}),5);
-  report.companionHashCheck=await measured(()=>{
-    for(const name of ['codex-code-mode-host.exe','codex-command-runner.exe','codex-windows-sandbox-setup.exe']){
-      const digest=file=>createHash('sha256').update(readFileSync(file)).digest('hex');
-      assert.equal(digest(join(dirname(config.originalCodexExe),name)),digest(join(dirname(config.appServerExe),name)));
-    }
-  },5);
+  report.companionHashCheck=await measured(()=>runtimeCompanions.verifyBackendRuntime(config),5);
   // Rotate order to reduce a systematic first-process/file-cache bias.
   const starts={original:[],patched:[],bridge:[]};
   for(let round=0;round<samples;round++)for(const mode of ['original','patched','bridge'].slice(round%3).concat(['original','patched','bridge'].slice(0,round%3))){

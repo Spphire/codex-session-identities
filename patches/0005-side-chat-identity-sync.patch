@@ -166,3 +166,14 @@ index a8412a1..1e86a9e 100644
          self.identity_bindings.lock().await.insert(id, binding);
          self.thread_identity_read(ThreadIdentityReadParams {
              thread_id: id.to_string(),
+diff --git a/codex-rs/app-server/src/request_processors/thread_processor.rs b/codex-rs/app-server/src/request_processors/thread_processor.rs
+--- a/codex-rs/app-server/src/request_processors/thread_processor.rs
++++ b/codex-rs/app-server/src/request_processors/thread_processor.rs
+@@ -5548,6 +5548,7 @@ impl ThreadRequestProcessor {
+         let fork_identity = inherited_identity.map(|source| thread_identity::IdentityBinding {
+             identity_id: source.identity_id,
+             revision: 1,
++            parent_thread_id: Some(source_thread_id),
+         });
+         if let (Some(id), Some(binding)) = (reserved_thread_id, fork_identity.as_ref()) {
+             self.save_identity_binding(id, Some(binding)).await?;

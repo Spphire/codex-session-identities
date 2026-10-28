@@ -1,10 +1,16 @@
 {
   "summary": "../VALIDATION.md",
   "sideChatSmoke": "../test/side-chat-identity-smoke.mjs",
+  "switchBlockerSmoke": "../test/switch-blocker-smoke.mjs",
+  "patchReplay": {
+    "patches": 10,
+    "freshPinnedFiles": true,
+    "allPatchesAppliedInOrder": true
+  },
   "testedDesktop": "26.1007.2314.0",
   "originalCli": "0.162.0-alpha.17.2",
   "nodeTests": {
-    "passed": 42,
+    "passed": 94,
     "failed": 0
   },
   "rustTests": {
@@ -12,7 +18,78 @@
     "officialIdentityFencePassed": 1
   },
   "scope": "Experimental Windows release on the pinned baseline. Raw private-account reports are not distributed.",
-  "backendSha256": "AE4A715F6493F909B49D046F8379CA42D2401384CF8CA14F89D6E99A8D74EFAA",
-  "buildProfile": {"profile":"release","optLevel":3,"debug":0,"lto":false,"codegenUnits":16},
-  "performanceReport": "../PERFORMANCE.md"
+  "backendSha256": "1208BF80A68FAADD6D59F7F05DE49A870862C9197C97F30C253603CDE948F353",
+  "buildProfile": {
+    "profile": "release",
+    "optLevel": 3,
+    "debug": 0,
+    "lto": false,
+    "codegenUnits": 16
+  },
+  "performanceReport": "../PERFORMANCE.md",
+  "ephemeralForkSmoke": "../test/ephemeral-fork-identity-smoke.mjs",
+  "ephemeralForkRegression": {
+    "date": "2026-10-17",
+    "oldBackendReproducedFlagLoss": true,
+    "historyModes": [
+      "legacy",
+      "paginated"
+    ],
+    "temporaryForksPerMode": 3,
+    "renameRefreshesPerMode": 2,
+    "noPersistedThreadOrBinding": true,
+    "ordinaryForkIdentitySync": true,
+    "syntheticResponsesOnly": true
+  },
+  "browserReconnect": {
+    "date": "2026-10-23",
+    "nativePatch": "0008-thread-browser-reconnect.patch",
+    "backendSha256": "041446FF37F1767AF5198E7F9F39D541C4FD459BAFF4029A99558B7592235968",
+    "nodeTestsPassed": 76,
+    "uiDesktopMobilePassed": true,
+    "incrementalPatchReplayPassed": true,
+    "unchangedConfigurationReconnect": true,
+    "busyUnconfiguredUnloadedGuards": true,
+    "siblingUnaffected": true,
+    "legacyPaginatedIdentityRegression": true,
+    "headlessProtocolPassed": true,
+    "externalModelRequests": 0,
+    "realAccountsUsed": false,
+    "liveIabPageOperationVerified": false,
+    "activation": "next normal launch; no running Desktop restarted"
+  },
+  "independentForkIdentities": {
+    "date": "2026-10-23",
+    "nativePatch": "0009-independent-fork-identities.patch",
+    "backendSha256": "529E2A624D7B668ED1FE9D25838A463032F7AF780D6201BD291E49932ADCDE52",
+    "legacyCouplingReproduced": true,
+    "activeForkDoesNotBlockRoot": true,
+    "forkNotInterrupted": true,
+    "legacyBindingIndependent": true,
+    "actualRequestCredentialsVerified": true,
+    "unloadedForkIndependentlySwitchable": true,
+    "targetBackgroundStillBlocks": true,
+    "forkBackgroundDoesNotBlockRoot": true,
+    "ephemeralForkLegacyPaginatedPassed": true,
+    "sidebarBrowserRegressionPassed": true,
+    "nodeTestsPassed": 76,
+    "uiPassed": true,
+    "incrementalPatchReplayPassed": true,
+    "externalModelRequests": 0,
+    "realAccountsUsed": false,
+    "activation": "next normal launch"
+  },
+  "ownedWorkForceRegression": {
+    "date": "2026-10-28",
+    "completedSubagentResultPreservedInNextModelRequest": true,
+    "activeReplyStopped": true,
+    "ownedTerminalsStopped": true,
+    "ownedSubagentsStopped": true,
+    "independentForkPreserved": true,
+    "invalidTargetNonDestructive": true,
+    "fullForceUI": true,
+    "pairedExecution": true,
+    "remoteApricity": "ssh-unreachable",
+    "externalModelRequests": 0
+  }
 }

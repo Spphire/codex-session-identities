@@ -1,0 +1,160 @@
+diff --git a/codex-rs/app-server/src/request_processors/thread_identity.rs b/codex-rs/app-server/src/request_processors/thread_identity.rs
+--- a/codex-rs/app-server/src/request_processors/thread_identity.rs
++++ b/codex-rs/app-server/src/request_processors/thread_identity.rs
+@@ -41,86 +41,6 @@
+ }
+ 
+ impl ThreadRequestProcessor {
+-    async fn forked_identity_descendants(
+-        &self,
+-        root: ThreadId,
+-    ) -> Result<Vec<ThreadId>, JSONRPCErrorError> {
+-        let mut records = Vec::new();
+-        for archived in [false, true] {
+-            let mut cursor = None;
+-            loop {
+-                let page = self
+-                    .thread_store
+-                    .list_threads(codex_thread_store::ListThreadsParams {
+-                        page_size: 100,
+-                        cursor: cursor.clone(),
+-                        sort_key: codex_thread_store::ThreadSortKey::CreatedAt,
+-                        sort_direction: codex_thread_store::SortDirection::Asc,
+-                        allowed_sources: Vec::new(),
+-                        model_providers: None,
+-                        cwd_filters: None,
+-                        section: None,
+-                        project_id: None,
+-                        archived,
+-                        search_term: None,
+-                        relation_filter: None,
+-                        use_state_db_only: true,
+-                    })
+-                    .await
+-                    .map_err(|error| internal_error(format!("cannot inspect side chats: {error}")))?;
+-                records.extend(page.items);
+-                let Some(next) = page.next_cursor else { break };
+-                if cursor.as_ref() == Some(&next) { break }
+-                cursor = Some(next);
+-            }
+-        }
+-        let mut parents = HashMap::new();
+-        for (&child, binding) in self.identity_bindings.lock().await.iter() {
+-            if let Some(parent) = binding.parent_thread_id {
+-                parents.entry(child).or_insert(parent);
+-            }
+-        }
+-        for record in records {
+-            if let Some(parent) = record.forked_from_id.or(record.parent_thread_id) {
+-                parents.entry(record.thread_id).or_insert(parent);
+-            }
+-        }
+-        let mut descendants = Vec::new();
+-        let mut frontier = vec![root];
+-        while let Some(parent) = frontier.pop() {
+-            for (&child, &candidate_parent) in &parents {
+-                if candidate_parent == parent && !descendants.contains(&child) {
+-                    descendants.push(child);
+-                    frontier.push(child);
+-                }
+-            }
+-        }
+-        Ok(descendants)
+-    }
+-
+-    async fn side_chat_identity_blocker(
+-        &self,
+-        root: ThreadId,
+-    ) -> Result<Option<ThreadIdentityBlocker>, JSONRPCErrorError> {
+-        for child in self.forked_identity_descendants(root).await? {
+-            let Ok(thread) = self.thread_manager.get_thread(child).await else { continue };
+-            let terminal_count = thread.list_background_terminals().await.len() as u32;
+-            let active = matches!(thread.agent_status().await, AgentStatus::Running)
+-                || matches!(
+-                    self.thread_watch_manager.loaded_status_for_thread(&child.to_string()).await,
+-                    ThreadStatus::Active { .. }
+-                );
+-            if active || terminal_count > 0 {
+-                return Ok(Some(ThreadIdentityBlocker {
+-                    reason: if active { "side_chat_running" } else { "side_chat_background_terminals" }.to_string(),
+-                    thread_id: child.to_string(),
+-                    terminal_count,
+-                }));
+-            }
+-        }
+-        Ok(None)
+-    }
+-
+     async fn identity_busy_response(
+         &self,
+         root: ThreadId,
+@@ -132,38 +52,6 @@
+         state.status = "busy".to_string();
+         state.blocker = Some(blocker);
+         Ok(state)
+-    }
+-
+-    async fn synchronize_side_chat_identity(
+-        &self,
+-        root: ThreadId,
+-        binding: &IdentityBinding,
+-    ) -> Result<(), JSONRPCErrorError> {
+-        for child in self.forked_identity_descendants(root).await? {
+-            let previous = self.load_identity_binding(child).await?;
+-            let next = IdentityBinding {
+-                identity_id: binding.identity_id.clone(),
+-                revision: previous
+-                    .as_ref()
+-                    .map_or(1, |value| value.revision.saturating_add(1)),
+-                parent_thread_id: previous
+-                    .as_ref()
+-                    .and_then(|value| value.parent_thread_id)
+-                    .or(Some(root)),
+-            };
+-            self.save_identity_binding(child, Some(&next)).await?;
+-            if let Ok(thread) = self.thread_manager.get_thread(child).await {
+-                if !thread.shutdown_if_idle().await.map_err(|_| {
+-                    internal_error("cannot unload idle side chat during identity change")
+-                })? {
+-                    return Err(invalid_request("side chat became busy; retry identity change"));
+-                }
+-                self.thread_manager.remove_thread(&child).await;
+-                self.outgoing.cancel_requests_for_thread(child, None).await;
+-                self.identity_bindings.lock().await.remove(&child);
+-            }
+-        }
+-        Ok(())
+     }
+ 
+     pub(super) async fn pinned_identity_provider(
+@@ -479,9 +367,6 @@
+                 "identity switching currently requires a persisted root thread",
+             ));
+         }
+-        if let Some(blocker) = self.side_chat_identity_blocker(id).await? {
+-            return self.identity_busy_response(id, blocker).await;
+-        }
+         let terminal_count = thread.list_background_terminals().await.len() as u32;
+         let active = matches!(thread.agent_status().await, AgentStatus::Running)
+             || matches!(
+@@ -637,7 +522,6 @@
+                 })?;
+             return Err(error);
+         }
+-        self.synchronize_side_chat_identity(id, &binding).await?;
+         self.identity_bindings.lock().await.insert(id, binding);
+         self.thread_identity_read(ThreadIdentityReadParams {
+             thread_id: id.to_string(),
+diff --git a/codex-rs/app-server/src/request_processors/thread_processor.rs b/codex-rs/app-server/src/request_processors/thread_processor.rs
+--- a/codex-rs/app-server/src/request_processors/thread_processor.rs
++++ b/codex-rs/app-server/src/request_processors/thread_processor.rs
+@@ -5550,7 +5550,8 @@
+             revision: 1,
+             // Temporary metadata jobs inherit an identity snapshot, not a durable
+             // side-chat relationship that could later create a binding on disk.
+-            parent_thread_id: (!options.config.ephemeral).then_some(source_thread_id),
++            // Ordinary forks inherit once; ancestry does not couple future identity changes.
++            parent_thread_id: None,
+         });
+         if let (Some(id), Some(binding)) = (reserved_thread_id, fork_identity.as_ref()) {
+             self.save_identity_binding(id, Some(binding)).await?;

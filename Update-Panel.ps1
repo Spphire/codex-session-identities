@@ -6,7 +6,20 @@ $Installation=(Resolve-Path -LiteralPath $Installation).Path
 $Source=(Resolve-Path -LiteralPath $Source).Path
 if($Installation -eq $Source){throw 'Source and installation must be separate directories'}
 $configuration=Get-Content (Join-Path $Installation 'runtime-config.json') -Raw | ConvertFrom-Json
-$files=@('catalog.mjs','official-login.mjs','official-usage.mjs','execution-policy.cjs','bridge-client.mjs','server.mjs','public\app.js','public\index.html','public\style.css','package.json','USER-GUIDE.md','PERFORMANCE.md','VALIDATION.md')
+$files=@('catalog.mjs','switch-coordinator.mjs','official-login.mjs','official-usage.mjs','execution-policy.cjs','bridge-client.mjs','server.mjs','public\app.js','public\index.html','public\style.css','package.json','USER-GUIDE.md','PERFORMANCE.md','VALIDATION.md')
+$files+='tool-health.mjs'
+$files+='repair-browser-runtime.mjs'
+$files+='desktop-browser-health.mjs'
+$files+='terminal-switch.mjs'
+$files+='runtime-status.mjs'
+$files+='CHANGELOG.md'
+$files+='Launch-Codex.ps1'
+$files+='compatibility-probe.mjs'
+$files+='runtime-bridge.cjs'
+$files+='runtime-companions.cjs'
+$files+='Update-Panel.ps1'
+$files+='open-panel.mjs'
+$files+='Open-PanelWindow.ps1'
 foreach($name in $files){if(!(Test-Path -LiteralPath (Join-Path $Source $name))){throw ('Missing panel update file: '+$name)}}
 $authFiles=@(Join-Path $configuration.codexHome 'auth.json')
 $profiles=Join-Path $configuration.codexHome 'session-identities\profiles'

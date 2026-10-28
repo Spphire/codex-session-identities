@@ -1,0 +1,27 @@
+diff --git a/codex-rs/app-server/src/request_processors/thread_identity.rs b/codex-rs/app-server/src/request_processors/thread_identity.rs
+--- a/codex-rs/app-server/src/request_processors/thread_identity.rs
++++ b/codex-rs/app-server/src/request_processors/thread_identity.rs
+@@ -303,6 +303,9 @@ impl ThreadRequestProcessor {
+                     compact_prompt: current.compact_prompt.clone(),
+                     review_model: current.review_model.clone(),
+                     show_raw_agent_reasoning: Some(current.show_raw_agent_reasoning),
++                    // Typed session overrides are not retained in the SessionFlags layer.
++                    // Internal title/description forks must remain temporary after rebinding.
++                    ephemeral: Some(current.ephemeral),
+                     ..Default::default()
+                 },
+                 Some(current.cwd.to_path_buf()),
+diff --git a/codex-rs/app-server/src/request_processors/thread_processor.rs b/codex-rs/app-server/src/request_processors/thread_processor.rs
+--- a/codex-rs/app-server/src/request_processors/thread_processor.rs
++++ b/codex-rs/app-server/src/request_processors/thread_processor.rs
+@@ -5548,7 +5548,9 @@ impl ThreadRequestProcessor {
+         let fork_identity = inherited_identity.map(|source| thread_identity::IdentityBinding {
+             identity_id: source.identity_id,
+             revision: 1,
+-            parent_thread_id: Some(source_thread_id),
++            // Temporary metadata jobs inherit an identity snapshot, not a durable
++            // side-chat relationship that could later create a binding on disk.
++            parent_thread_id: (!options.config.ephemeral).then_some(source_thread_id),
+         });
+         if let (Some(id), Some(binding)) = (reserved_thread_id, fork_identity.as_ref()) {
+             self.save_identity_binding(id, Some(binding)).await?;

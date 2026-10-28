@@ -13,6 +13,12 @@ $originalDirectory=Split-Path -Parent $CodexExe
 foreach($name in $companionNames){if(!(Test-Path -LiteralPath (Join-Path $originalDirectory $name))){throw ('Original CLI companion is missing: '+$name)}}
 $payload=Join-Path $PSScriptRoot 'payload'
 if(!(Test-Path -LiteralPath (Join-Path $payload 'codex-app-server.exe'))){throw 'Use the packaged release containing payload binaries.'}
+if(!(Test-Path -LiteralPath (Join-Path $payload 'backend-runtime\manifest.json'))){throw 'Use a release containing the paired backend runtime.'}
+$paired=Get-Content -LiteralPath (Join-Path $payload 'backend-runtime\manifest.json') -Raw -Encoding UTF8|ConvertFrom-Json
+foreach($name in @('codex-app-server.exe')+$companionNames){
+    $file=if($name -eq 'codex-app-server.exe'){Join-Path $payload $name}else{Join-Path $payload ('backend-runtime\'+$name)}
+    if($paired.$name -notmatch '^[a-fA-F0-9]{64}$' -or !(Test-Path -LiteralPath $file) -or (Get-FileHash -LiteralPath $file).Hash -ne $paired.$name){throw ('Release backend runtime is incomplete or mismatched: '+$name)}
+}
 if(Get-CimInstance Win32_Process|Where-Object {$_.ExecutablePath -and $_.ExecutablePath.StartsWith($InstallDirectory+'\',[StringComparison]::OrdinalIgnoreCase) -and $_.Name -like 'codex*'}){throw 'Close the patched Codex before replacing its files.'}
 $trayPath=Join-Path $InstallDirectory 'identity-tray.exe'
 if(Test-Path -LiteralPath $trayPath){
@@ -30,8 +36,9 @@ if(Test-Path -LiteralPath $accessFile){
 }
 New-Item -ItemType Directory -Path $InstallDirectory -Force|Out-Null
 Copy-Item -Path (Join-Path $payload '*') -Destination $InstallDirectory -Recurse -Force
-foreach($name in $companionNames){Copy-Item -LiteralPath (Join-Path $originalDirectory $name) -Destination (Join-Path $InstallDirectory $name) -Force}
 $configuration=@{originalCodexExe=$CodexExe;appServerExe=(Join-Path $InstallDirectory 'codex-app-server.exe');desktopExe=$DesktopExe;codexHome=$CodexHome;panelPort=18189;integrationTests=$false;managePermissions=$true;upstreamCommit='0c7362d121d1c7f69540262425fd4e2209fd8e8d'}
+$configuration.backendRuntimeManifest=Join-Path $InstallDirectory 'backend-runtime\manifest.json'
+$configuration.identityForceRevision=1
 [IO.File]::WriteAllText((Join-Path $InstallDirectory 'runtime-config.json'),($configuration|ConvertTo-Json),[Text.UTF8Encoding]::new($false))
 $env:CODEX_HOME=$CodexHome
 $node=Join-Path $InstallDirectory 'node.exe'
