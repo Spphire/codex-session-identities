@@ -15,9 +15,10 @@ import permissionControl from './execution-policy.cjs';
 import {ToolHealth,BrowserHealth} from './tool-health.mjs';
 import {inspectDesktopBrowser} from './desktop-browser-health.mjs';
 import {TerminalSwitch} from './terminal-switch.mjs';
+import {addApiIdentity} from './api-identities.mjs';
 
 const root = dirname(fileURLToPath(import.meta.url));
-export function panelServer({ codexDirectory, switcherDirectory, originalCodexExe, officialUsageOptions, bridge:providedBridge, accessToken=randomBytes(32).toString('hex') }) {
+export function panelServer({ codexDirectory, switcherDirectory, originalCodexExe, officialUsageOptions, apiIdentityOptions, bridge:providedBridge, accessToken=randomBytes(32).toString('hex') }) {
   const login=new OfficialLogin(codexDirectory,originalCodexExe);
   const usage=new OfficialUsage(codexDirectory,officialUsageOptions);
   const bridge = providedBridge || new BridgeClient(codexDirectory);
@@ -54,6 +55,13 @@ export function panelServer({ codexDirectory, switcherDirectory, originalCodexEx
       if(supplied.length!==expected.length||!timingSafeEqual(supplied,expected)){json(401,{error:'面板访问未授权'});return;}
     }
     try {
+      if(req.url==='/api/identities/add-api'){
+        if(req.method!=='POST'){json(405,{error:'请使用面板添加 API 身份。'});return;}
+        if(req.headers.origin!==`http://${host}`||!req.headers['content-type']?.startsWith('application/json')){json(403,{error:'仅接受面板内操作'});return;}
+        const chunks=[];let size=0;for await(const chunk of req){size+=chunk.length;if(size>16384){json(413,{error:'请求过大'});return;}chunks.push(chunk)}const body=Buffer.concat(chunks).toString('utf8');
+        let input;try{input=JSON.parse(body)}catch{json(400,{error:'请求格式无效'});return;}
+        try{json(201,await exclusive(()=>addApiIdentity(codexDirectory,input,apiIdentityOptions)))}catch(error){json(400,{error:error.message})}return;
+      }
       if(req.method==='POST'&&['/api/switch-terminals/prepare','/api/switch-terminals/confirm'].includes(req.url)){
         if(req.headers.origin!==`http://${host}`||!req.headers['content-type']?.startsWith('application/json')){json(403,{error:'仅接受面板内操作'});return;}
         let body='';for await(const chunk of req){body+=chunk;if(Buffer.byteLength(body)>4096){json(413,{error:'请求过大'});return;}}

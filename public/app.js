@@ -319,6 +319,21 @@ async function mutate(cancel=false){
 $('identity').addEventListener('change',renderDetail);$('switch').addEventListener('click',()=>mutate());$('cancel-switch').addEventListener('click',()=>mutate(true));
 $('force-switch').addEventListener('click',()=>offerForceSwitch(identityDetail,true));
 $('refresh-usage').addEventListener('click',()=>refreshUsage(true));
+let apiAdding=false;
+$('api-form').addEventListener('submit',async event=>{
+  event.preventDefault();if(apiAdding)return;apiAdding=true;$('add-api').disabled=true;
+  const input={name:$('api-name').value,baseUrl:$('api-base-url').value,model:$('api-model').value,apiKey:$('api-key').value};
+  $('api-key').value='';$('api-status').textContent='正在保存 API 身份…';
+  const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),30000);
+  try{
+    const response=await apiFetch('/api/identities/add-api',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(input),signal:controller.signal});
+    input.apiKey='';const value=await response.json();if(!response.ok)throw new Error(value.error||'添加失败。');
+    $('api-form').reset();await refresh();
+    if(selected&&[...$('identity').options].some(o=>o.value===value.identityId)){$('identity').value=value.identityId;renderDetail()}
+    $('api-status').textContent=`已添加 ${value.name}。请选择会话并切换；尚未验证服务连接。`;
+  }catch(error){$('api-status').textContent=controller.signal.aborted?'保存等待超时，请刷新身份列表核对后再重试。':error.message}
+  finally{input.apiKey='';clearTimeout(timer);apiAdding=false;$('add-api').disabled=false}
+});
 $('search').addEventListener('input',renderRows); $('provider').addEventListener('change',renderRows); $('archived').addEventListener('change',renderRows); $('refresh').addEventListener('click',refresh);
 setInterval(()=>{if(!document.hidden)void refresh();},5000);refresh();
 document.addEventListener('visibilitychange',()=>{clearTimeout(identityPollTimer);clearTimeout(usageTimer);if(!document.hidden){usageNextAt=0;void refresh();}});

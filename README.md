@@ -13,6 +13,7 @@ See [USER-GUIDE.md](USER-GUIDE.md) for installation, identity registration, swit
 ## Features
 
 - Independent official and API identities per chat; system official login and separately registered official accounts.
+- Add third-party Responses API identities directly from the panel; keys are stored in Windows Credential Manager and the configured default model follows the identity.
 - Busy switches wait until idle; saved and runtime-confirmed bindings are distinguished.
 - Explicit force confirmation pauses the selected chat's active goal, interrupts its reply and cleans up its owned terminals and subagents before verifying the requested identity. Failed cleanup stops automatic queuing with an explicit error.
 - Account/user fencing, sibling isolation, cold-chat binding and child/fork inheritance.

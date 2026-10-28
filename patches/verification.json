@@ -10,7 +10,7 @@
   "testedDesktop": "26.1007.2314.0",
   "originalCli": "0.162.0-alpha.17.2",
   "nodeTests": {
-    "passed": 94,
+    "passed": 98,
     "failed": 0
   },
   "rustTests": {
@@ -100,5 +100,16 @@
     "reportedDesktop26_1023_6123_0": "pending-user-verification",
     "nestedNativeErrorRetained": true,
     "fallbackScopeUnitTests": true
+  },
+  "apiIdentityRegistration": {
+    "date": "2026-10-28",
+    "realWindowsCredentialManager": true,
+    "panelFormDesktopMobile": true,
+    "nativeAuthorizationAndModelRouting": true,
+    "coldResume": true,
+    "globalConfigUnchanged": true,
+    "credentialOverwriteRefused": true,
+    "syntheticCredentialsCleanedUp": true,
+    "externalModelRequests": 0
   }
 }

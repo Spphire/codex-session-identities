@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.12 - 2026-10-28
+
+- Add a panel form for third-party Responses API identities: name, Base URL, default model ID and API key. Successful registration adds a selectable identity without switching any chat or making a model request.
+- Store new keys in the current user's Windows Credential Manager using the native helper's standard input. Profile files contain only the helper reference; API responses and diagnostics never return the key. Clear the password field after submitting, including failures.
+- Publish profiles only after credential storage/check succeeds; roll back newly stored credentials if later preparation fails. Credential creation refuses overwriting an existing target.
+- Verify real panel registration, native switching, exact authorization/model routing and cold resume against isolated loopback fixtures and real Windows credential entries; clean up all synthetic credentials afterward.
+
 ## 0.1.11 - 2026-10-28
 
 - When direct process creation returns Windows access-denied for the current user's registered Codex Store executable, retry in that exact package's context. Preserve the launcher configuration paths explicitly; package activation does not inherit the caller's environment.

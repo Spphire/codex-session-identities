@@ -1,5 +1,10 @@
 # Validation Summary
 
+2026-10-28 panel API registration (0.1.12):
+- API form unit/HTTP tests cover valid local/HTTPS endpoints, invalid URLs/models/keys, credential-free profile publication, credential cleanup on check failure, origin/access controls, bounded request bodies and secret exclusion from returned state.
+- Real Windows Credential Manager and native backend integration passed: add two profiles through the HTTP endpoint, refuse credential overwrite, switch A/B, verify exact loopback Authorization headers and configured model IDs, then restart the isolated backend and resume with B. Global config remained unchanged and all synthetic credentials were removed.
+- Headless Edge API form tests passed password masking, failed-save retry, immediate key-field clearing, persistence after reload and desktop/mobile layout. Existing full panel UI smoke also passed. No real account or external model service was used.
+
 2026-10-28 Store launch fallback (0.1.11):
 - Real package-context invocation confirmed that caller environment variables are not inherited. The new helper transfers only the six launcher configuration variables and keeps backend verification mandatory.
 - Forced package-context startup passed the real isolated-profile Desktop handshake on 26.1021.3705.0 against the installed v13 backend. Production Desktop was not restarted. This validates the alternative startup mechanism, not the reported friend's 26.1023.6123.0 installation.
