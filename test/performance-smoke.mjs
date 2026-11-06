@@ -1,3 +1,4 @@
+import {copyBridgeFixture} from './support/bridge-fixture.mjs';
 // Explicit, isolated benchmark. No real credentials or paid model requests.
 import assert from 'node:assert/strict';
 import {createServer} from 'node:http';
@@ -42,7 +43,7 @@ const server=createServer(async(req,res)=>{
 server.listen(0,'127.0.0.1');await once(server,'listening');
 const base=`http://127.0.0.1:${server.address().port}/v1`;
 const bridgeDirectory=join(directory,'adapter');await mkdir(bridgeDirectory);
-for(const name of ['runtime-bridge.cjs','runtime-companions.cjs','client-version-compat.cjs','feature-config-compat.cjs','model-catalog-compat.cjs','stdio-client.mjs'])await copyFile(join(root,name),join(bridgeDirectory,name));
+await copyBridgeFixture(bridgeDirectory,["stdio-client.mjs"]);
 await writeFile(join(bridgeDirectory,'runtime-config.json'),JSON.stringify({appServerExe:config.appServerExe,originalCodexExe:config.originalCodexExe,backendRuntimeManifest:config.backendRuntimeManifest}));
 const env={...process.env,CODEX_IDENTITY_CLIENT_VERSION:'0.162.0-alpha.17.2',NO_PROXY:'127.0.0.1,localhost,::1',no_proxy:'127.0.0.1,localhost,::1',RUST_MIN_STACK:'33554432'};
 for(const key of ['CODEX_ACCESS_TOKEN','CODEX_API_KEY','OPENAI_API_KEY','OPENAI_BASE_URL','HTTP_PROXY','HTTPS_PROXY','ALL_PROXY','http_proxy','https_proxy','all_proxy'])delete env[key];

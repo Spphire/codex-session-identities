@@ -5,26 +5,9 @@ if(!$Source){$Source=$PSScriptRoot}
 $Installation=(Resolve-Path -LiteralPath $Installation).Path
 $Source=(Resolve-Path -LiteralPath $Source).Path
 if($Installation -eq $Source){throw 'Source and installation must be separate directories'}
-$configuration=Get-Content (Join-Path $Installation 'runtime-config.json') -Raw | ConvertFrom-Json
-$files=@('catalog.mjs','switch-coordinator.mjs','official-login.mjs','official-usage.mjs','execution-policy.cjs','bridge-client.mjs','server.mjs','public\app.js','public\index.html','public\style.css','package.json','USER-GUIDE.md','PERFORMANCE.md','VALIDATION.md')
-$files+='tool-health.mjs'
-$files+='repair-browser-runtime.mjs'
-$files+='desktop-browser-health.mjs'
-$files+='terminal-switch.mjs'
-$files+='api-identities.mjs'
-$files+='codex-identity-credential.exe'
-$files+='runtime-status.mjs'
-$files+='CHANGELOG.md'
-$files+='Launch-Codex.ps1'
-$files+='launch-process.ps1'
-$files+='package-launch-helper.ps1'
-$files+='Test-DesktopCompatibility.ps1'
-$files+='compatibility-probe.mjs'
-$files+='runtime-bridge.cjs'
-$files+='runtime-companions.cjs'
-$files+='Update-Panel.ps1'
-$files+='open-panel.mjs'
-$files+='Open-PanelWindow.ps1'
+$configuration=Get-Content (Join-Path $Installation 'runtime-config.json') -Raw -Encoding UTF8 | ConvertFrom-Json
+. (Join-Path $Source 'payload-files.ps1')
+$files=@(Get-IdentityPayloadFiles -Source $Source -PanelUpdate)
 foreach($name in $files){if(!(Test-Path -LiteralPath (Join-Path $Source $name))){throw ('Missing panel update file: '+$name)}}
 $authFiles=@(Join-Path $configuration.codexHome 'auth.json')
 $profiles=Join-Path $configuration.codexHome 'session-identities\profiles'
@@ -35,10 +18,13 @@ $backendHash=(Get-FileHash -LiteralPath $configuration.appServerExe).Hash
 $accessPath=Join-Path $configuration.codexHome ('session-identities\panel-access-'+$configuration.panelPort+'.json')
 function Stop-OwnedPanel {
     if(!(Test-Path -LiteralPath $accessPath)){return}
-    $access=Get-Content $accessPath -Raw | ConvertFrom-Json
+    $access=Get-Content $accessPath -Raw -Encoding UTF8 | ConvertFrom-Json
     $panel=Get-CimInstance Win32_Process -Filter ('ProcessId='+[int]$access.pid)
     if(!$panel){return}
     if($panel.ExecutablePath -ne (Join-Path $Installation 'node.exe') -or $panel.CommandLine -notmatch [regex]::Escape((Join-Path $Installation 'server.mjs'))){throw 'Panel PID does not belong to this installation'}
+    $current=Get-CimInstance Win32_Process -Filter ('ProcessId='+$panel.ProcessId)
+    if(!$current){return}
+    if($current.CreationDate -ne $panel.CreationDate -or $current.ExecutablePath -ne $panel.ExecutablePath -or $current.CommandLine -ne $panel.CommandLine){throw 'Panel process changed before update; retry after checking its owner'}
     Stop-Process -Id $panel.ProcessId
     Wait-Process -Id $panel.ProcessId -Timeout 5 -ErrorAction SilentlyContinue
 }
@@ -49,7 +35,7 @@ function Start-UpdatedPanel {
     $null=$process.Handle
     if(!$process.WaitForExit(20000)){throw 'Panel startup exceeded deadline'}
     if($process.ExitCode -ne 0){throw 'Panel startup failed'}
-    $access=Get-Content $accessPath -Raw | ConvertFrom-Json
+    $access=Get-Content $accessPath -Raw -Encoding UTF8 | ConvertFrom-Json
     return Invoke-RestMethod -Uri ('http://127.0.0.1:'+$configuration.panelPort+'/api/state') -Headers @{'X-Codex-Identity-Access'=$access.token} -TimeoutSec 5
 }
 $backup=Join-Path $Installation ('backups\panel-'+[DateTime]::UtcNow.ToString('yyyyMMddHHmmssfff'))
@@ -69,7 +55,11 @@ try{
 }catch{
     $failure=$_
     Stop-OwnedPanel
-    foreach($name in $files){$save=Join-Path $backup $name;if(Test-Path -LiteralPath $save){Copy-Item -LiteralPath $save -Destination (Join-Path $Installation $name) -Force}}
+    foreach($name in $files){
+        $save=Join-Path $backup $name;$target=Join-Path $Installation $name
+        if(Test-Path -LiteralPath $save){Copy-Item -LiteralPath $save -Destination $target -Force}
+        elseif(Test-Path -LiteralPath $target){Remove-Item -LiteralPath $target -Force}
+    }
     try{$null=Start-UpdatedPanel}catch{Write-Warning 'Restored panel files, but the previous panel could not start'}
     throw $failure
 }

@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.1.13 — 2026-11-06
+
+- Separate panel HTTP boundaries, bridge request policy, native identifier validation,
+  browser recovery and UI recovery controllers. Keep installed entrypoint names stable.
+- Derive full and small-update files from one payload inventory, including every
+  runtime dependency; reject reused release output directories. Roll back newly
+  introduced files and guard panel process identity before stopping it.
+- Persist `force_unverified` correctly so failed force cleanup stops automatic
+  queuing. Fence asynchronous operations and acknowledgements to their original
+  runtime; ignore old identity responses after changing UI selection.
+- Preserve force-action errors across refresh, reap a backend that ignores Desktop
+  EOF, clear pending bridge timers, and omit pipe access tokens from diagnostics.
+- Validate real old-version update/rollback, native loopback behavior, Windows
+  lifecycle fixtures, UI behavior and patch replay. See `AUDIT.md` and `ARCHITECTURE.md`.
+
 ## 0.1.12 - 2026-10-28
 
 - Add a panel form for third-party Responses API identities: name, Base URL, default model ID and API key. Successful registration adds a selectable identity without switching any chat or making a model request.

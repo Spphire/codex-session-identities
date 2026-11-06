@@ -1,5 +1,24 @@
 # Validation Summary
 
+2026-11-06 source structure audit (v0.1.13 candidate):
+- 109 Node tests passed locally and on Apricity using Node 24.19.0. The diagnostics
+  smoke check additionally verifies that control-pipe access tokens are not emitted.
+- Fifteen native loopback cases passed, including both history modes and ephemeral forks, independent
+  forks, terminal blockers, completed/active owned agents, browser/MCP refresh,
+  structured features, permissions, Appshots, API vault/cold resume and paired
+  code-mode/nested shell execution. No real external model requests were made.
+- Ten isolated Windows checks passed, including actual fixture process restart,
+  rejected update preserving the existing fixture, runtime hashes and PID reuse.
+- Edge panel/API desktop/mobile suites and a delayed selection-response regression
+  passed. Screenshots were visually reviewed.
+- Fresh full/small payload hashes and a real old-panel-to-new-panel update passed;
+  an intentionally broken candidate rolled back all old files and removed new ones.
+  Synthetic auth, config and backend hashes remained unchanged.
+- Ten patches replayed from the pinned base; all 21 touched files match the actual
+  upstream checkout after line-ending normalization. Rust source/binary unchanged.
+- These are source/candidate validations, not a publication, production deployment
+  or new official Desktop compatibility claim. See `AUDIT.md` for dispositions.
+
 2026-10-28 panel API registration (0.1.12):
 - API form unit/HTTP tests cover valid local/HTTPS endpoints, invalid URLs/models/keys, credential-free profile publication, credential cleanup on check failure, origin/access controls, bounded request bodies and secret exclusion from returned state.
 - Real Windows Credential Manager and native backend integration passed: add two profiles through the HTTP endpoint, refuse credential overwrite, switch A/B, verify exact loopback Authorization headers and configured model IDs, then restart the isolated backend and resume with B. Global config remained unchanged and all synthetic credentials were removed.

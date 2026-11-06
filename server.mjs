@@ -1,6 +1,6 @@
 import { createServer } from 'node:http';
 import { readFile, mkdir, writeFile } from 'node:fs/promises';
-import { randomBytes, timingSafeEqual } from 'node:crypto';
+import { randomBytes } from 'node:crypto';
 import { homedir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -12,10 +12,12 @@ import { BridgeClient } from './bridge-client.mjs';
 import { SwitchCoordinator } from './switch-coordinator.mjs';
 import { existsSync } from 'node:fs';
 import permissionControl from './execution-policy.cjs';
-import {ToolHealth,BrowserHealth} from './tool-health.mjs';
+import {ToolHealth} from './tool-health.mjs';
+import {BrowserHealth} from './browser-health.mjs';
 import {inspectDesktopBrowser} from './desktop-browser-health.mjs';
 import {TerminalSwitch} from './terminal-switch.mjs';
 import {addApiIdentity} from './api-identities.mjs';
+import {hasPanelAccess,isPanelJsonRequest,readJsonBody,readRequestBody,writeJson} from './panel-http.mjs';
 
 const root = dirname(fileURLToPath(import.meta.url));
 export function panelServer({ codexDirectory, switcherDirectory, originalCodexExe, officialUsageOptions, apiIdentityOptions, bridge:providedBridge, accessToken=randomBytes(32).toString('hex') }) {
@@ -39,6 +41,7 @@ export function panelServer({ codexDirectory, switcherDirectory, originalCodexEx
   const files = new Map([
     ['/', ['index.html', 'text/html; charset=utf-8']],
     ['/app.js', ['app.js', 'text/javascript; charset=utf-8']],
+    ['/recovery-controls.js', ['recovery-controls.js', 'text/javascript; charset=utf-8']],
     ['/style.css', ['style.css', 'text/css; charset=utf-8']],
     ['/icon.svg', ['icon.svg', 'image/svg+xml']],
   ]);
@@ -49,29 +52,25 @@ export function panelServer({ codexDirectory, switcherDirectory, originalCodexEx
     res.setHeader('Cache-Control', 'no-store');
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('Content-Security-Policy', "default-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'");
-    const json = (status, data) => { res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8' }); res.end(JSON.stringify(data)); };
+    const json = (status, data) => writeJson(res,status,data);
     if(req.url?.startsWith('/api/')){
-      const supplied=Buffer.from(String(req.headers['x-codex-identity-access']||''));const expected=Buffer.from(accessToken);
-      if(supplied.length!==expected.length||!timingSafeEqual(supplied,expected)){json(401,{error:'面板访问未授权'});return;}
+      if(!hasPanelAccess(req,accessToken)){json(401,{error:'面板访问未授权'});return;}
     }
     try {
       if(req.url==='/api/identities/add-api'){
         if(req.method!=='POST'){json(405,{error:'请使用面板添加 API 身份。'});return;}
-        if(req.headers.origin!==`http://${host}`||!req.headers['content-type']?.startsWith('application/json')){json(403,{error:'仅接受面板内操作'});return;}
-        const chunks=[];let size=0;for await(const chunk of req){size+=chunk.length;if(size>16384){json(413,{error:'请求过大'});return;}chunks.push(chunk)}const body=Buffer.concat(chunks).toString('utf8');
-        let input;try{input=JSON.parse(body)}catch{json(400,{error:'请求格式无效'});return;}
+        if(!isPanelJsonRequest(req,host)){json(403,{error:'仅接受面板内操作'});return;}
+        let input;try{input=await readJsonBody(req,16384)}catch(error){if(error.statusCode===413){json(413,{error:error.message});return;}json(400,{error:'请求格式无效'});return;}
         try{json(201,await exclusive(()=>addApiIdentity(codexDirectory,input,apiIdentityOptions)))}catch(error){json(400,{error:error.message})}return;
       }
       if(req.method==='POST'&&['/api/switch-terminals/prepare','/api/switch-terminals/confirm'].includes(req.url)){
-        if(req.headers.origin!==`http://${host}`||!req.headers['content-type']?.startsWith('application/json')){json(403,{error:'仅接受面板内操作'});return;}
-        let body='';for await(const chunk of req){body+=chunk;if(Buffer.byteLength(body)>4096){json(413,{error:'请求过大'});return;}}
-        try{const input=JSON.parse(body);json(200,await exclusive(()=>req.url.endsWith('/prepare')?terminalSwitch.prepare(input):terminalSwitch.confirm(input)))}catch(error){json(409,{error:error.message})}return;
+        if(!isPanelJsonRequest(req,host)){json(403,{error:'仅接受面板内操作'});return;}
+        try{const input=await readJsonBody(req,4096);json(200,await exclusive(()=>req.url.endsWith('/prepare')?terminalSwitch.prepare(input):terminalSwitch.confirm(input)))}catch(error){json(error.statusCode===413?413:409,{error:error.message})}return;
       }
       if(req.url?.startsWith('/api/tools/')||req.url?.startsWith('/api/browser/')){
         if(req.method!=='POST'){json(405,{error:'请使用面板操作'});return;}
-        if(req.headers.origin!==`http://${host}`||!req.headers['content-type']?.startsWith('application/json')){json(403,{error:'仅接受面板内操作'});return;}
-        let body='';for await(const chunk of req){body+=chunk;if(Buffer.byteLength(body)>4096){json(413,{error:'请求过大'});return;}}
-        const input=JSON.parse(body);
+        if(!isPanelJsonRequest(req,host)){json(403,{error:'仅接受面板内操作'});return;}
+        const input=await readJsonBody(req,4096);
         if(req.url==='/api/browser/diagnose'){json(200,await browserHealth.diagnose(input.threadId));return;}
         if(req.url==='/api/browser/recover'){
           try{json(200,await exclusive(()=>browserHealth.recover(input)));}catch(error){json(409,{error:error.message});}return;
@@ -84,9 +83,8 @@ export function panelServer({ codexDirectory, switcherDirectory, originalCodexEx
       }
       if(req.url==='/api/permissions'&&req.method==='GET'){json(200,await permissionsView());return;}
       if(req.url==='/api/permissions'&&req.method==='POST'){
-        if(req.headers.origin!==`http://${host}`||!req.headers['content-type']?.startsWith('application/json')){json(403,{error:'仅接受面板内操作'});return;}
-        let body='';for await(const chunk of req){body+=chunk;if(Buffer.byteLength(body)>4096){json(413,{error:'请求过大'});return;}}
-        const input=JSON.parse(body);
+        if(!isPanelJsonRequest(req,host)){json(403,{error:'仅接受面板内操作'});return;}
+        const input=await readJsonBody(req,4096);
         try{
           await exclusive(async()=>{
             if((await bridge.connect()).connected){
@@ -101,14 +99,13 @@ export function panelServer({ codexDirectory, switcherDirectory, originalCodexEx
       }
       if(req.url==='/api/official-login'&&req.method==='GET'){json(200,login.view());return;}
       if(req.method==='POST'&&['/api/official-login/start','/api/official-login/cancel'].includes(req.url)){
-        if(req.headers.origin!==`http://${host}`||!req.headers['content-type']?.startsWith('application/json')){json(403,{error:'仅接受面板内操作'});return;}
-        let size=0;for await(const chunk of req){size+=chunk.length;if(size>4096){json(413,{error:'请求过大'});return;}}
+        if(!isPanelJsonRequest(req,host)){json(403,{error:'仅接受面板内操作'});return;}
+        await readRequestBody(req,4096);
         json(200,await exclusive(()=>req.url.endsWith('/start')?login.start():login.cancel()));return;
       }
       if(req.method==='POST'&&req.url==='/api/identities/remove'){
-        if(req.headers.origin!==`http://${host}`||!req.headers['content-type']?.startsWith('application/json')){json(403,{error:'仅接受面板内操作'});return;}
-        let body='';for await(const chunk of req){body+=chunk;if(Buffer.byteLength(body)>4096){json(413,{error:'请求过大'});return;}}
-        const input=JSON.parse(body);
+        if(!isPanelJsonRequest(req,host)){json(403,{error:'仅接受面板内操作'});return;}
+        const input=await readJsonBody(req,4096);
         try{
           const result=await exclusive(()=>removeIdentity(codexDirectory,readCatalog(codexDirectory,switcherDirectory),input,coordinator?.store.pendingRequests()||[],[...observed.values()].map(x=>x.identity)));
           json(200,result);
@@ -116,17 +113,15 @@ export function panelServer({ codexDirectory, switcherDirectory, originalCodexEx
         return;
       }
       if(req.method==='POST'&&req.url==='/api/official-login/refresh'){
-        if(req.headers.origin!==`http://${host}`||!req.headers['content-type']?.startsWith('application/json')){json(403,{error:'仅接受面板内操作'});return;}
-        let body='';for await(const chunk of req){body+=chunk;if(Buffer.byteLength(body)>4096){json(413,{error:'请求过大'});return;}}
-        const input=JSON.parse(body);const catalog=readCatalog(codexDirectory,switcherDirectory);const identity=catalog.identities.find(x=>x.kind==='chatgpt'&&x.reauthRuntimeId===input.runtimeId&&!x.removed);
+        if(!isPanelJsonRequest(req,host)){json(403,{error:'仅接受面板内操作'});return;}
+        const input=await readJsonBody(req,4096);const catalog=readCatalog(codexDirectory,switcherDirectory);const identity=catalog.identities.find(x=>x.kind==='chatgpt'&&x.reauthRuntimeId===input.runtimeId&&!x.removed);
         if(!identity||!identity.available){json(409,{error:'官方身份不可用，请刷新面板后重试'});return;}
         json(200,await exclusive(()=>login.startRefresh(identity.reauthRuntimeId)));return;
       }
       if (req.method==='POST' && ['/api/switch','/api/cancel'].includes(req.url)) {
-        if(req.headers.origin!==`http://${host}` || !req.headers['content-type']?.startsWith('application/json')){json(403,{error:'仅接受面板内操作'});return;}
+        if(!isPanelJsonRequest(req,host)){json(403,{error:'仅接受面板内操作'});return;}
         if(!(await bridge.connect()).connected){json(503,{error:'运行时桥接未接入，未更改任何会话身份。'});return;}
-        let body='';for await(const chunk of req){body+=chunk;if(Buffer.byteLength(body)>4096){json(413,{error:'请求过大'});return;}}
-        const input=JSON.parse(body);
+        const input=await readJsonBody(req,4096);
         if(!/^[a-f0-9-]{36}$/.test(input.threadId||'') || !Number.isSafeInteger(input.expectedDesiredRevision) || input.expectedDesiredRevision<0){json(400,{error:'无效的会话或版本'});return;}
         coordinator??=new SwitchCoordinator(codexDirectory,bridge);
         if(req.url==='/api/cancel'){json(200,coordinator.cancel(input.threadId,input.expectedDesiredRevision));return;}
@@ -169,7 +164,7 @@ export function panelServer({ codexDirectory, switcherDirectory, originalCodexEx
       const bytes = await readFile(join(root, 'public', asset[0]));
       res.writeHead(200, { 'Content-Type': asset[1] }); res.end(bytes);
     } catch(error) {
-      json(500, { error: error instanceof SyntaxError?'请求格式无效':String(error.message || '身份操作失败') });
+      json(error.statusCode||500, { error: error instanceof SyntaxError?'请求格式无效':String(error.message || '身份操作失败') });
     }
   });
   server.on('close',()=>{usage.close();coordinator?.close();bridge.close();executionPolicy?.close();void login.cancel().catch(()=>{});});

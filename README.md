@@ -10,6 +10,8 @@ Download the Windows ZIP from this repository's Releases, extract it and run `In
 
 See [USER-GUIDE.md](USER-GUIDE.md) for installation, identity registration, switching, rollback and updates. The installer discovers the official CLI and verifies the release's paired backend and execution companions. Do not deploy only the patched backend executable.
 
+The maintained module boundaries and refactoring rules are documented in [ARCHITECTURE.md](ARCHITECTURE.md).
+
 ## Features
 
 - Independent official and API identities per chat; system official login and separately registered official accounts.

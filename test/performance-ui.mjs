@@ -12,7 +12,7 @@ const fixture=()=>({observedAt:new Date().toISOString(),runtime:{connected:false
 const server=createServer(async(req,res)=>{
   if(req.url==='/api/state'){res.setHeader('Content-Type','application/json');res.end(JSON.stringify(fixture()));return;}
   if(req.url==='/api/official-login'){res.setHeader('Content-Type','application/json');res.end('{"status":"idle"}');return;}
-  const name={'/':'index.html','/app.js':'app.js','/style.css':'style.css','/icon.svg':'icon.svg'}[req.url];
+  const name={'/':'index.html','/app.js':'app.js','/recovery-controls.js':'recovery-controls.js','/style.css':'style.css','/icon.svg':'icon.svg'}[req.url];
   if(!name){res.writeHead(404);res.end();return;}
   res.setHeader('Content-Type',name.endsWith('.js')?'text/javascript':name.endsWith('.css')?'text/css':name.endsWith('.svg')?'image/svg+xml':'text/html');
   const source=await readFile(join(root,name),'utf8');

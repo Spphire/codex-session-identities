@@ -124,7 +124,7 @@ try {
 
 更新安装包前关闭使用该安装目录的 Codex，再运行新版 `Install.ps1`。首次加载和代码更新需要重新启动后端；普通身份切换不需要。
 
-v0.1.3 到 v0.1.4 只更新面板功能，Rust 后端保持不变。无需退出 Codex，可以在新包的 `payload` 目录运行 `powershell -NoProfile -ExecutionPolicy Bypass -File .\Update-Panel.ps1 -Installation '<现有安装目录>'`。脚本备份旧面板文件、验证进程归属后只重启面板服务，并检查登录文件与后端哈希；失败时恢复旧面板文件。已有面板网页刷新后生效。其他跨版本升级继续使用安装程序并完成版本兼容验证，不能用这个脚本跳过后端升级。
+v0.1.10–v0.1.13 的现有安装可使用 `CodexSessionIdentity-PanelUpdate-v0.1.13.zip`，解压后运行 `powershell -NoProfile -ExecutionPolicy Bypass -File .\Apply-PanelUpdate.ps1 -Installation '<现有安装目录>'`。小更新包依赖已有完整安装，不能单独安装。脚本核验包内文件、备份旧文件、检查进程归属后只重启面板服务，并验证登录文件与后端哈希；失败时恢复旧文件并移除本次新增文件。刷新面板后，身份排队、强制切换错误处理等面板修复立即生效。桥接代码在下次正常重启 Codex 时加载；请先完成正在运行的任务。v0.1.13 沿用 v0.1.10 起配套的原生后端，不能用小更新包跳过更早版本的后端升级。全新安装或其他版本请使用完整安装包。
 
 ## 源码补丁
 

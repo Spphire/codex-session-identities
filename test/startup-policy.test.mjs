@@ -1,3 +1,4 @@
+import {copyBridgeFixture} from './support/bridge-fixture.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {mkdtemp,copyFile,writeFile,readFile,rm} from 'node:fs/promises';
@@ -8,7 +9,7 @@ import {spawnSync} from 'node:child_process';
 for(const signOut of [false,true])test(`startup policy delegates unchanged to official CLI (sign out: ${signOut})`,async()=>{
   const root=await mkdtemp(join(tmpdir(),'identity-startup-policy-'));
   try{
-    for(const file of ['runtime-bridge.cjs','model-catalog-compat.cjs','client-version-compat.cjs','feature-config-compat.cjs'])await copyFile(resolve(file),join(root,file));
+    await copyBridgeFixture(root,[]);
     await writeFile(join(root,'runtime-config.json'),JSON.stringify({originalCodexExe:process.execPath,appServerExe:join(root,'must-not-run.exe')}));
     // Node treats app-server as its script: emulate the official command without
     // using credentials, signing out a real account, or starting a real Desktop.

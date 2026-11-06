@@ -1,5 +1,5 @@
 import {randomBytes} from 'node:crypto';
-import {validThreadId} from './tool-health.mjs';
+import {validThreadId} from './identity-contract.cjs';
 
 const stale=()=>new Error('切换请求或后台任务已变化，请重新检查并确认。');
 const snapshot=rows=>JSON.stringify(rows.map(t=>[t.processId,t.itemId,t.osPid]).sort((a,b)=>String(a[0]).localeCompare(String(b[0]))));
@@ -49,9 +49,11 @@ export class TerminalSwitch {
       if(t.allOwned){
         try{
           let goal;
-          try{goal=await this.bridge.call('thread/goal/get',{threadId},5000)}catch(error){if(!/goals feature is disabled/i.test(error.message))throw error}
-          if(goal?.goal?.status==='active')await this.bridge.call('thread/goal/set',{threadId,origin:'user',status:'paused'},10000);
-          const result=await this.bridge.call('thread/identity/forceSet',{threadId,identityId:t.identityId,expectedRevision:request.nativeRevision},150000);
+          try{goal=await this.bridge.call('thread/goal/get',{threadId},5000,t.pid)}catch(error){if(!/goals feature is disabled/i.test(error.message))throw error}
+          this.current(threadId,t.revision,t.pid);
+          if(goal?.goal?.status==='active')await this.bridge.call('thread/goal/set',{threadId,origin:'user',status:'paused'},10000,t.pid);
+          this.current(threadId,t.revision,t.pid);
+          const result=await this.bridge.call('thread/identity/forceSet',{threadId,identityId:t.identityId,expectedRevision:request.nativeRevision},150000,t.pid);
           if(!result.verified||result.status!=='applied'||result.identityId!==t.identityId)throw new Error('后端未确认新身份生效。');
           const current=this.current(threadId,t.revision,t.pid);
           if(current.v.desiredIdentityId!==t.identityId)throw stale();
@@ -64,13 +66,13 @@ export class TerminalSwitch {
           throw new Error('强制切换未核验成功，已停止自动排队。'+detail);
         }
       }
-      const check=await this.bridge.call('thread/identity/set',{threadId,identityId:t.identityId,expectedRevision:request.nativeRevision},10000);
+      const check=await this.bridge.call('thread/identity/set',{threadId,identityId:t.identityId,expectedRevision:request.nativeRevision},10000,t.pid);
       if(check.verified&&check.identityId===t.identityId)return {status:'retrying',terminated:0};
       if(check.status!=='busy'||check.blocker?.reason!=='background_terminals'||check.blocker.threadId!==threadId)throw new Error('会话已开始回复或存在其他阻塞，未关闭后台终端。');
       const rows=await this.inventory(threadId);if(snapshot(rows)!==t.snapshot)throw stale();
       for(const row of rows){
         const live=this.current(threadId,t.revision,t.pid);if(live.v.desiredIdentityId!==t.identityId)throw stale();
-        await this.bridge.call('thread/backgroundTerminals/terminate',{threadId,processId:row.processId},5000);
+        await this.bridge.call('thread/backgroundTerminals/terminate',{threadId,processId:row.processId},5000,t.pid);
       }
       const remaining=await this.inventory(threadId);
       return {status:remaining.length?'waiting':'retrying',terminated:rows.length-remaining.filter(row=>rows.some(t=>t.processId===row.processId)).length,remaining:remaining.length};

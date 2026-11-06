@@ -1,3 +1,4 @@
+import {copyBridgeFixture} from './support/bridge-fixture.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
@@ -22,7 +23,7 @@ function messages(input) {
 
 for(const forceEnabled of [false,true])test(`bridge authenticates and validates control methods (force=${forceEnabled})`, async t=>{
   const directory=await mkdtemp(join(tmpdir(),'identity-bridge-'));
-  for(const name of ['runtime-bridge.cjs','model-catalog-compat.cjs','client-version-compat.cjs','feature-config-compat.cjs'])await copyFile(resolve(name),join(directory,name));
+  await copyBridgeFixture(directory,[]);
   await writeFile(join(directory,'runtime-config.json'),JSON.stringify({identityForceRevision:forceEnabled?1:0}));
   const stub=`const r=require('node:readline').createInterface({input:process.stdin});r.on('line',line=>{const v=JSON.parse(line);if(v.id!=null)process.stdout.write(JSON.stringify({id:v.id,result:{method:v.method,params:v.params}})+'\\n');});`;
   await writeFile(join(directory,'app-server'),stub);

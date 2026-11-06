@@ -28,7 +28,7 @@ try{
   if(!descriptor)throw new Error('Panel service unavailable');
   if(process.argv.includes('--check')){console.log(JSON.stringify({ready:true,port}));process.exit(0);}
   const uiHash=createHash('sha256');
-  for(const contents of await Promise.all(['index.html','app.js','style.css'].map(name=>readFile(join(root,'public',name)))))uiHash.update(contents);
+  for(const contents of await Promise.all(['index.html','app.js','recovery-controls.js','style.css'].map(name=>readFile(join(root,'public',name)))))uiHash.update(contents);
   const uiVersion=uiHash.digest('hex');
   let previous={};try{previous=JSON.parse(await readFile(join(directory,'panel-window-status.json'),'utf8'));}catch{}
   const reload=process.argv.includes('--reload')||previous.uiVersion!==uiVersion||previous.panelPid!==descriptor.pid||previous.port!==port;

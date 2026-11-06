@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {TerminalSwitch} from '../terminal-switch.mjs';
+import {BindingStore} from '../bindings.mjs';
 const id='01a12537-493b-7542-b502-d487829730f1';
 function fixture(){
   const calls=[],queue={pending:true,desiredRevision:3,desiredIdentityId:'new',wait:{reason:'background_terminals',threadId:id}},rows=[{processId:'10',itemId:'a',osPid:100,command:'Bearer secret'},{processId:'11',itemId:'b',osPid:101}];
@@ -59,4 +60,36 @@ test('full force failure stops automatic queue and does not leak upstream creden
   const p=await f.service.prepare({threadId:id,expectedDesiredRevision:3});
   await assert.rejects(()=>f.service.confirm({threadId:id,confirmation:p.confirmation}),error=>!error.message.includes('private-secret')&&error.message.includes('停止自动排队'));
   assert.equal(rejected[3],'force_unverified');assert.equal(f.c.inflight.size,0);
+});
+
+test('force failure durably removes the request from the real pending queue',async t=>{
+  const f=fixture(),store=new BindingStore(':memory:');t.after(()=>store.close());
+  store.requestSwitch(id,'new',0,7);store.attachRuntime(id,'runtime-1');
+  f.c.store=store;f.c.waiting=new Map();
+  f.c.view=()=>({...store.read(id),wait:{reason:'reply_running',threadId:id}});
+  const call=f.bridge.call.bind(f.bridge);
+  f.bridge.call=async(method,p)=>{
+    if(method==='bridge/terminals/capabilities')return{revision:1,forceSwitchRevision:1};
+    if(method==='thread/goal/get')return{goal:null};
+    if(method==='thread/identity/forceSet')throw Error('Bearer private-secret');
+    return call(method,p);
+  };
+  const prepared=await f.service.prepare({threadId:id,expectedDesiredRevision:1});
+  await assert.rejects(()=>f.service.confirm({threadId:id,confirmation:prepared.confirmation}),/停止自动排队/);
+  assert.equal(store.read(id).errorCode,'force_unverified');
+  assert.deepEqual(store.pendingRequests(),[]);
+  assert.equal(f.c.inflight.size,0);
+  assert.throws(()=>store.reject(id,'runtime-1',1,'untrusted_error'),/Unsupported public error code/);
+});
+
+test('runtime replacement during goal inspection cannot pause or force the replacement',async()=>{
+  const f=fixture(),call=f.bridge.call.bind(f.bridge);
+  f.bridge.call=async(method,p)=>{
+    if(method==='bridge/terminals/capabilities')return{revision:1,forceSwitchRevision:1};
+    if(method==='thread/goal/get'){f.bridge.pid=2;return{goal:{status:'active'}};}
+    return call(method,p);
+  };
+  const prepared=await f.service.prepare({threadId:id,expectedDesiredRevision:3});
+  await assert.rejects(()=>f.service.confirm({threadId:id,confirmation:prepared.confirmation}),/未核验成功/);
+  assert.equal(f.calls.some(x=>['thread/goal/set','thread/identity/forceSet'].includes(x.method)),false);
 });

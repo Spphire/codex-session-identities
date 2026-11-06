@@ -26,7 +26,7 @@ function setup(t){
     throw new Error('Unexpected RPC');
   }};
   t.after(async()=>{for(const item of coordinators)item.close();await new Promise(r=>setImmediate(r));rmSync(directory,{recursive:true,force:true});});
-  return {states,busy,blockers,writes,events,replaceRuntime(pid){runtimePid=pid;},disconnect(){connected=false;},create(){const coordinator=new SwitchCoordinator(directory,bridge);clearInterval(coordinator.timer);coordinators.push(coordinator);return coordinator;}};
+  return {states,busy,blockers,writes,events,bridge,replaceRuntime(pid){runtimePid=pid;},disconnect(){connected=false;},create(){const coordinator=new SwitchCoordinator(directory,bridge);clearInterval(coordinator.timer);coordinators.push(coordinator);return coordinator;}};
 }
 async function settled(coordinator){for(let i=0;i<20;i++){await new Promise(r=>setImmediate(r));if(!coordinator.inflight.size)return;}throw new Error('Coordinator did not settle');}
 
@@ -113,4 +113,19 @@ test('old or unknown backend blockers stay generic and never claim a guessed cau
   f.blockers.set('one',{reason:'PRIVATE_BACKEND_TEXT',threadId:'javascript:secret',terminalCount:-2});
   await c.tick();assert.equal(c.view('one').wait.reason,'backend_busy');assert.equal(c.view('one').wait.threadId,null);assert.equal(c.view('one').wait.terminalCount,0);
   f.disconnect();assert.equal(c.view('one').wait,null);
+});
+
+for(const method of ['thread/identity/read','thread/identity/set'])test(`replacement during ${method} leaves the request pending for the new runtime`,async t=>{
+  const f=setup(t),c=f.create();f.busy.add('one');
+  await c.submit('one','api_a',0,0);await settled(c);f.busy.clear();
+  const call=f.bridge.call;
+  f.bridge.call=async(m,p)=>{const result=await call(m,p);if(m===method){f.replaceRuntime(43);f.bridge.call=call;}return result;};
+  await c.tick();
+  assert.equal(c.store.read('one').pending,true);
+  assert.equal(c.store.read('one').errorCode,null);
+  assert.equal(c.store.read('one').appliedIdentityId,null);
+  await c.tick();
+  assert.equal(c.view('one').verified,true);
+  assert.equal(c.view('one').runtimeId,'runtime-43');
+  assert.equal(f.writes.length,1);
 });

@@ -1,3 +1,4 @@
+import {copyBridgeFixture} from './support/bridge-fixture.mjs';
 import assert from 'node:assert/strict';
 import {mkdtemp,mkdir,writeFile,copyFile,rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
@@ -25,7 +26,7 @@ try{
  native=new StdioClient(executable,['--listen','stdio://'],{cwd:home,env});await native.initialize('feature_schema_before');
  await assert.rejects(native.call('thread/start',{cwd:home,ephemeral:true,config:override}),/invalid type: map, expected a boolean/);
  await native.close();native=null;
- for(const name of ['runtime-bridge.cjs','model-catalog-compat.cjs','client-version-compat.cjs','feature-config-compat.cjs'])await copyFile(new URL('../'+name,import.meta.url),join(home,name));
+ await copyBridgeFixture(home,[]);
  await writeFile(join(home,'runtime-config.json'),JSON.stringify({appServerExe:executable}));
  bridge=new StdioClient(process.execPath,[join(home,'runtime-bridge.cjs'),'app-server'],{cwd:home,env});await bridge.initialize('feature_schema_after');
  const {thread}=await bridge.call('thread/start',{cwd:home,approvalPolicy:'never',sandbox:'read-only',config:override});assert.ok(thread.id);

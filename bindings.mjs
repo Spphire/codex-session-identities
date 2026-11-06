@@ -149,7 +149,7 @@ export class BindingStore {
 
   reject(threadId, runtimeId, revision, errorCode) {
     identifier(threadId); identifier(runtimeId);
-    const allowed = new Set(['identity_missing', 'credentials_unavailable', 'model_unavailable', 'policy_denied', 'runtime_unavailable']);
+    const allowed = new Set(['identity_missing', 'credentials_unavailable', 'model_unavailable', 'policy_denied', 'runtime_unavailable', 'force_unverified']);
     if (!allowed.has(errorCode)) throw new TypeError('Unsupported public error code');
     return this.transaction(() => {
       const current = this.read(threadId);

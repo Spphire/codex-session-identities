@@ -4,7 +4,8 @@ import {EventEmitter,once} from 'node:events';
 import {mkdtemp,rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
-import {ToolHealth,BrowserHealth} from '../tool-health.mjs';
+import {ToolHealth} from '../tool-health.mjs';
+import {BrowserHealth} from '../browser-health.mjs';
 import {panelServer} from '../server.mjs';
 const id='01a16269-6419-7f33-9843-93c35da768cb';
 test('Desktop bootstrap failure prevents misleading per-chat browser reloads',async()=>{

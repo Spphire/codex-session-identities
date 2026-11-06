@@ -10,7 +10,9 @@ const result={checkedAt:new Date().toISOString(),descriptors:[],logsDirectory:lo
 for(const file of await readdir(directory).catch(()=>[])){
   if(!/^\d+\.json$/.test(file))continue;
   const descriptor=JSON.parse(await readFile(join(directory,file),'utf8'));
-  const entry={file,...descriptor,bridgeAlive:false,pipeReachable:false};
+  // Runtime descriptors contain the control-pipe access token. Diagnostics may
+  // be pasted into issues; publish only explicitly allowed process metadata.
+  const entry={file,protocol:descriptor.protocol,bridgePid:descriptor.bridgePid,runtimePid:descriptor.runtimePid,role:descriptor.role,bridgeAlive:false,pipeReachable:false};
   try{process.kill(Number(descriptor.bridgePid),0);entry.bridgeAlive=true;}catch{}
   if(entry.bridgeAlive)await new Promise(resolve=>{const socket=createConnection(descriptor.pipe);const timer=setTimeout(()=>{socket.destroy();resolve();},1200);socket.on('error',()=>{clearTimeout(timer);resolve();});socket.on('connect',()=>{socket.write(JSON.stringify({token:descriptor.token})+'\n');});socket.on('data',chunk=>{clearTimeout(timer);entry.pipeReachable=String(chunk).includes('"protocol":1');socket.destroy();resolve();});});
   result.descriptors.push(entry);

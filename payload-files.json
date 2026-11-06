@@ -1,0 +1,265 @@
+{
+  "version": 1,
+  "files": [
+    {
+      "path": "ARCHITECTURE.md",
+      "panelUpdate": true
+    },
+    {
+      "path": "CHANGELOG.md",
+      "panelUpdate": true
+    },
+    {
+      "path": "Disable.ps1",
+      "panelUpdate": false
+    },
+    {
+      "path": "Install-Shortcuts.ps1",
+      "panelUpdate": false
+    },
+    {
+      "path": "Launch-Codex.ps1",
+      "panelUpdate": true
+    },
+    {
+      "path": "Open-PanelWindow.ps1",
+      "panelUpdate": true
+    },
+    {
+      "path": "PERFORMANCE.md",
+      "panelUpdate": true
+    },
+    {
+      "path": "Test-DesktopCompatibility.ps1",
+      "panelUpdate": true
+    },
+    {
+      "path": "USER-GUIDE.md",
+      "panelUpdate": true
+    },
+    {
+      "path": "Update-Panel.ps1",
+      "panelUpdate": true
+    },
+    {
+      "path": "VALIDATION.md",
+      "panelUpdate": true
+    },
+    {
+      "path": "api-identities.mjs",
+      "panelUpdate": true
+    },
+    {
+      "path": "bindings.mjs",
+      "panelUpdate": true
+    },
+    {
+      "path": "bridge-client.mjs",
+      "panelUpdate": true
+    },
+    {
+      "path": "bridge-health.mjs",
+      "panelUpdate": true
+    },
+    {
+      "path": "bridge-policy.cjs",
+      "panelUpdate": true
+    },
+    {
+      "path": "browser-health.mjs",
+      "panelUpdate": true
+    },
+    {
+      "path": "catalog.mjs",
+      "panelUpdate": true
+    },
+    {
+      "path": "client-version-compat.cjs",
+      "panelUpdate": true
+    },
+    {
+      "path": "codex-identity-credential.exe",
+      "panelUpdate": true
+    },
+    {
+      "path": "codex-identity.exe",
+      "panelUpdate": false
+    },
+    {
+      "path": "codex-session-desktop.exe",
+      "panelUpdate": false
+    },
+    {
+      "path": "compatibility-probe.mjs",
+      "panelUpdate": true
+    },
+    {
+      "path": "desktop-browser-health.mjs",
+      "panelUpdate": true
+    },
+    {
+      "path": "ensure-provider-aliases.mjs",
+      "panelUpdate": true
+    },
+    {
+      "path": "execution-policy.cjs",
+      "panelUpdate": true
+    },
+    {
+      "path": "execution-probe.mjs",
+      "panelUpdate": true
+    },
+    {
+      "path": "export-compat.mjs",
+      "panelUpdate": true
+    },
+    {
+      "path": "feature-config-compat.cjs",
+      "panelUpdate": true
+    },
+    {
+      "path": "identity-contract.cjs",
+      "panelUpdate": true
+    },
+    {
+      "path": "identity-management.mjs",
+      "panelUpdate": true
+    },
+    {
+      "path": "identity-panel.exe",
+      "panelUpdate": false
+    },
+    {
+      "path": "identity-tray.exe",
+      "panelUpdate": false
+    },
+    {
+      "path": "import-profiles.mjs",
+      "panelUpdate": true
+    },
+    {
+      "path": "launch-process.ps1",
+      "panelUpdate": true
+    },
+    {
+      "path": "launcher-permissions.ps1",
+      "panelUpdate": false
+    },
+    {
+      "path": "model-catalog-compat.cjs",
+      "panelUpdate": true
+    },
+    {
+      "path": "official-login.mjs",
+      "panelUpdate": true
+    },
+    {
+      "path": "official-profile-credential.mjs",
+      "panelUpdate": true
+    },
+    {
+      "path": "official-usage.mjs",
+      "panelUpdate": true
+    },
+    {
+      "path": "official-vault.ps1",
+      "panelUpdate": false
+    },
+    {
+      "path": "open-panel.mjs",
+      "panelUpdate": true
+    },
+    {
+      "path": "package-launch-helper.ps1",
+      "panelUpdate": true
+    },
+    {
+      "path": "package.json",
+      "panelUpdate": true
+    },
+    {
+      "path": "panel-http.mjs",
+      "panelUpdate": true
+    },
+    {
+      "path": "payload-files.json",
+      "panelUpdate": true
+    },
+    {
+      "path": "payload-files.ps1",
+      "panelUpdate": true
+    },
+    {
+      "path": "public/app.js",
+      "panelUpdate": true
+    },
+    {
+      "path": "public/icon.svg",
+      "panelUpdate": true
+    },
+    {
+      "path": "public/index.html",
+      "panelUpdate": true
+    },
+    {
+      "path": "public/recovery-controls.js",
+      "panelUpdate": true
+    },
+    {
+      "path": "public/style.css",
+      "panelUpdate": true
+    },
+    {
+      "path": "register-second-official.mjs",
+      "panelUpdate": true
+    },
+    {
+      "path": "register-system-official.mjs",
+      "panelUpdate": true
+    },
+    {
+      "path": "repair-browser-runtime.mjs",
+      "panelUpdate": true
+    },
+    {
+      "path": "resolve-installation.ps1",
+      "panelUpdate": false
+    },
+    {
+      "path": "runtime-bridge.cjs",
+      "panelUpdate": true
+    },
+    {
+      "path": "runtime-bundle.ps1",
+      "panelUpdate": false
+    },
+    {
+      "path": "runtime-companions.cjs",
+      "panelUpdate": true
+    },
+    {
+      "path": "runtime-status.mjs",
+      "panelUpdate": true
+    },
+    {
+      "path": "server.mjs",
+      "panelUpdate": true
+    },
+    {
+      "path": "stdio-client.mjs",
+      "panelUpdate": true
+    },
+    {
+      "path": "switch-coordinator.mjs",
+      "panelUpdate": true
+    },
+    {
+      "path": "terminal-switch.mjs",
+      "panelUpdate": true
+    },
+    {
+      "path": "tool-health.mjs",
+      "panelUpdate": true
+    }
+  ]
+}

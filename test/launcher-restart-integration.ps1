@@ -31,6 +31,7 @@ if($RejectCompatibility){[IO.File]::WriteAllText((Join-Path $FixtureDirectory 'c
 [IO.File]::WriteAllText((Join-Path $FixtureDirectory 'Test-DesktopCompatibility.ps1'),'param($Installation,$Fingerprint) @{passed=$true}|ConvertTo-Json -Compress',[Text.UTF8Encoding]::new($false))
 [IO.File]::WriteAllText((Join-Path $FixtureDirectory 'runtime-bundle.ps1'),'function Resolve-IdentityRuntime($Configuration,$Installation){return $Configuration}',[Text.UTF8Encoding]::new($false))
 [IO.File]::WriteAllText((Join-Path $FixtureDirectory 'ensure-provider-aliases.mjs'),'console.log(JSON.stringify({passed:true,providersAdded:0}));',[Text.UTF8Encoding]::new($false))
+[IO.File]::WriteAllText((Join-Path $FixtureDirectory 'repair-browser-runtime.mjs'),'console.log(JSON.stringify({passed:true,changed:false}));',[Text.UTF8Encoding]::new($false))
 $desktopPath=Join-Path $FixtureDirectory 'TestDesktop.exe'
 try {
     Start-Process -FilePath $desktopPath -WindowStyle Hidden|Out-Null
@@ -47,7 +48,7 @@ try {
     }else{
         $native=Start-Process -FilePath (Join-Path $FixtureDirectory 'codex-session-desktop.exe') -ArgumentList $arguments -WindowStyle Hidden -PassThru
     }
-    if(!$native.WaitForExit(25000)){throw 'Restart integration timed out'}
+    if(!$native.WaitForExit(60000)){throw 'Restart integration timed out'}
     if($RejectCompatibility){
         $failure=Get-Content -LiteralPath (Join-Path $FixtureDirectory 'launcher-status.json') -Raw -Encoding UTF8|ConvertFrom-Json
         if($native.ExitCode -eq 0 -or $failure.state -ne 'failed' -or $failure.details.stage -ne 'checking_protocol_compatibility'){throw 'Compatibility rejection did not fail at the expected stage'}

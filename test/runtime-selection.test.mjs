@@ -8,6 +8,14 @@ import {randomBytes} from 'node:crypto';
 import {once} from 'node:events';
 import {BridgeClient} from '../bridge-client.mjs';
 
+test('a request confirmed for one runtime is not sent after automatic reconnection to another',async()=>{
+  const client=new BridgeClient('unused');let writes=0;
+  client.socket={destroyed:false,write(){writes++}};client.ready=true;client.pid=101;
+  client.connect=async()=>{client.pid=102;return client.status()};
+  await assert.rejects(()=>client.call('thread/identity/forceSet',{},100,101),/后端已变化/);
+  assert.equal(writes,0);assert.equal(client.pending.size,0);
+});
+
 for(const scenario of [
   {roles:['auxiliary','desktop'],pid:101},
   {roles:['desktop','desktop'],pid:null},

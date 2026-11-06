@@ -6,11 +6,11 @@ if(!(Test-Path -LiteralPath (Join-Path $source 'Update-Panel.ps1'))){throw 'Buil
 $OutputDirectory=$ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($OutputDirectory)
 if(Test-Path -LiteralPath $OutputDirectory){throw 'Use a new output directory to avoid retaining stale files'}
 $payload=Join-Path $OutputDirectory 'payload';New-Item -ItemType Directory -Path $payload -Force|Out-Null
-foreach($file in Get-ChildItem -LiteralPath $source -Recurse -File){
-    $relative=$file.FullName.Substring($source.Length+1)
-    if($relative -like 'backend-runtime\*'){continue}
-    if($file.Extension -notin @('.mjs','.cjs','.js','.ps1','.md','.json','.html','.css','.svg') -and $file.Name -ne 'codex-identity-credential.exe'){continue}
-    $target=Join-Path $payload $relative;New-Item -ItemType Directory -Path (Split-Path -Parent $target) -Force|Out-Null;Copy-Item -LiteralPath $file.FullName -Destination $target
+. (Join-Path $source 'payload-files.ps1')
+foreach($relative in @(Get-IdentityPayloadFiles -Source $source -PanelUpdate)){
+    $target=Join-Path $payload $relative
+    New-Item -ItemType Directory -Path (Split-Path -Parent $target) -Force|Out-Null
+    Copy-Item -LiteralPath (Join-Path $source $relative) -Destination $target
 }
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'Apply-PanelUpdate.ps1') -Destination $OutputDirectory
 $version=(Get-Content (Join-Path $payload 'package.json') -Raw -Encoding UTF8|ConvertFrom-Json).version

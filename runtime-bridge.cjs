@@ -9,6 +9,7 @@ const { createInterface } = require('node:readline');
 const { InstalledModelCatalog, mergePage, validParams } = require('./model-catalog-compat.cjs');
 const {initializeResult} = require('./client-version-compat.cjs');
 const {compatibleFeatureConfig}=require('./feature-config-compat.cjs');
+const {panelRequestPolicy}=require('./bridge-policy.cjs');
 
 const originalArgs = process.argv.slice(2);
 let config={};
@@ -64,9 +65,7 @@ function startBridge() {
   const requestTimeoutMs=Number(process.env.IDENTITY_BRIDGE_REQUEST_TIMEOUT_MS||180000);
   log('bridge_started',{serverExecutable,serverArgs,role:originalArgs.includes('--analytics-default-enabled')?'desktop':'auxiliary',requestTimeoutMs});
   child.stderr?.on('data',chunk=>log('backend_stderr',{text:String(chunk).slice(-4000)}));
-  let sequence=0; let ready=false; let closing=false;
-  const permitted = new Set(['thread/list','thread/resume','thread/identity/read','thread/identity/set','model/list','configRequirements/read','bridge/permissions/read']);
-  if(config.integrationTests===true){for(const method of ['thread/start','thread/read','turn/start','thread/name/set','model/list'])permitted.add(method);}
+  let sequence=0; let ready=false; let closing=false; let desktopCloseTimer=null;
   const send = (stream, value) => { if (!stream.destroyed && !stream.writableEnded) stream.write(JSON.stringify(value)+'\n'); };
   const responseError = (stream, id, message) => send(stream,{id,error:{code:-32001,message}});
   function forward(value, destination) {
@@ -100,7 +99,18 @@ function startBridge() {
   createInterface({input:process.stdin}).on('line',line=>{
     try { forward(JSON.parse(line), process.stdout); }
     catch { process.stderr.write('Invalid desktop RPC frame\n'); }
-  }).on('close',()=>child.stdin.end());
+  }).on('close',()=>{
+    // Desktop owns this stdio server. A stuck backend must not keep publishing
+    // an orphan runtime after its owner has closed the input pipe.
+    if(closing)return;
+    log('desktop_input_closed');
+    child.stdin.end();
+    desktopCloseTimer=setTimeout(()=>{
+      log('desktop_shutdown_timeout');
+      child.kill();
+    },5000);
+    desktopCloseTimer.unref();
+  });
   createInterface({input:child.stdout}).on('line',line=>{
     let value;try{value=JSON.parse(line);}catch{process.stderr.write('Invalid backend RPC frame\n');return;}
     if (!value.method && value.id != null && routes.has(value.id)) {
@@ -134,34 +144,16 @@ function startBridge() {
         const line=buffer.slice(0,index);buffer=buffer.slice(index+1);
         let value;try{value=JSON.parse(line);}catch{socket.destroy();return;}
         if(!authenticated){
-          const candidate=Buffer.from(typeof value.token==='string'?value.token:'');
+          const candidate=Buffer.from(typeof value?.token==='string'?value.token:'');
           const expected=Buffer.from(token);
           if(candidate.length!==expected.length || !crypto.timingSafeEqual(candidate,expected)){socket.destroy();return;}
           authenticated=true;clearTimeout(deadline);clients.add(socket);send(socket,{ready,pid:child.pid,protocol:1});continue;
         }
-        if(config.integrationTests===true && value.method==='bridge/shutdown' && value.id!=null){send(socket,{id:value.id,result:{stopping:true}});child.stdin.end();continue;}
-        const toolMethod=['bridge/tools/capabilities','mcpServerStatus/list','config/mcpServer/reload','thread/browser/read','thread/browser/reload','bridge/terminals/capabilities','thread/backgroundTerminals/list','thread/backgroundTerminals/terminate','thread/identity/forceSet','thread/goal/get','thread/goal/set'].includes(value.method);
-        if(!value.method || value.id==null || (!permitted.has(value.method)&&!toolMethod)){responseError(socket,value.id??null,'Method not allowed by identity bridge');continue;}
-        if(!ready){responseError(socket,value.id,'Desktop has not initialized the backend');continue;}
-        if(toolMethod){
-          const p=value.params;
-          if(['thread/browser/read','thread/browser/reload'].includes(value.method)&&p&&Object.keys(p).length===1&&typeof p.threadId==='string'&&/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/i.test(p.threadId)){forward(value,socket);continue;}
-          const empty=p&&typeof p==='object'&&!Array.isArray(p)&&Object.keys(p).length===0;
-          if(value.method==='bridge/terminals/capabilities'&&empty){send(socket,{id:value.id,result:{revision:1,scope:'selected-thread',forceSwitchRevision:config.identityForceRevision===1?1:0}});continue;}
-          const terminalThread=p&&typeof p.threadId==='string'&&/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/i.test(p.threadId);
-          if(config.identityForceRevision===1&&terminalThread){
-            if(value.method==='thread/identity/forceSet'&&Object.keys(p).length===3&&typeof p.identityId==='string'&&/^[A-Za-z0-9_-]{1,100}$/.test(p.identityId)&&Number.isSafeInteger(p.expectedRevision)&&p.expectedRevision>=0){forward(value,socket);continue;}
-            if(value.method==='thread/goal/get'&&Object.keys(p).length===1){forward(value,socket);continue;}
-            if(value.method==='thread/goal/set'&&Object.keys(p).length===3&&p.origin==='user'&&p.status==='paused'){forward(value,socket);continue;}
-          }
-          if(value.method==='thread/backgroundTerminals/list'&&terminalThread&&Object.keys(p).every(k=>['threadId','cursor','limit'].includes(k))&&p.limit===100&&(p.cursor===null||typeof p.cursor==='string'&&p.cursor.length<=8192)){forward(value,socket);continue;}
-          if(value.method==='thread/backgroundTerminals/terminate'&&terminalThread&&Object.keys(p).length===2&&typeof p.processId==='string'&&/^\d{1,10}$/.test(p.processId)){forward(value,socket);continue;}
-          if(value.method==='bridge/tools/capabilities'&&empty){send(socket,{id:value.id,result:{revision:1,reloadScope:'all-loaded-threads'}});continue;}
-          if(value.method==='config/mcpServer/reload'&&empty){forward(value,socket);continue;}
-          if(value.method==='mcpServerStatus/list'&&p&&Object.keys(p).every(k=>['threadId','detail','limit','cursor'].includes(k))&&typeof p.threadId==='string'&&/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/i.test(p.threadId)&&p.detail==='toolsAndAuthOnly'&&p.limit===100&&(p.cursor===null||typeof p.cursor==='string'&&p.cursor.length<=8192)){forward(value,socket);continue;}
-          responseError(socket,value.id,'Invalid tool diagnostic parameters');continue;
-        }
-        if(value.method==='bridge/permissions/read'){
+        const decision=panelRequestPolicy(value,{ready,integrationTests:config.integrationTests,identityForceRevision:config.identityForceRevision});
+        if(decision.action==='reject'){responseError(socket,value?.id??null,decision.error);continue;}
+        if(decision.action==='shutdown'){send(socket,{id:value.id,result:{stopping:true}});child.stdin.end();continue;}
+        if(decision.action==='reply'){send(socket,{id:value.id,result:decision.result});continue;}
+        if(decision.action==='permissions'){
           send(socket,{id:value.id,result:{supported:Boolean(executionPolicy),...(executionPolicy?executionPolicy.read():{})}});continue;
         }
         forward(value,socket);
@@ -178,10 +170,12 @@ function startBridge() {
   });
   const heartbeat=setInterval(()=>log('heartbeat',{ready,closing,clients:clients.size,sockets:sockets.size,pending:routes.size,childAlive:child.exitCode===null}),10000);
   function cleanup(code){
-    if(closing)return;closing=true;clearInterval(heartbeat);log('bridge_stopping',{code,pending:routes.size,clients:clients.size});
+    if(closing)return;closing=true;clearInterval(heartbeat);clearTimeout(desktopCloseTimer);log('bridge_stopping',{code,pending:routes.size,clients:clients.size});
     modelCatalog?.close();
     executionPolicy?.close();
     for(const route of routes.values())responseError(route.destination,route.id,'Backend stopped');
+    for(const timer of routeTimers.values())clearTimeout(timer);
+    routeTimers.clear();routes.clear();
     for(const socket of sockets)socket.destroy();
     server.close();
     process.stdin.destroy();

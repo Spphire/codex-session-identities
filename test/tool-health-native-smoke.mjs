@@ -1,3 +1,4 @@
+import {copyBridgeFixture} from './support/bridge-fixture.mjs';
 import assert from 'node:assert/strict';
 import {mkdtemp,mkdir,copyFile,readFile,writeFile} from 'node:fs/promises';
 import {join} from 'node:path';
@@ -9,7 +10,7 @@ import {ToolHealth} from '../tool-health.mjs';
 const base=process.cwd();const installation=process.argv[2];
 const configuration=JSON.parse(await readFile(join(installation,'runtime-config.json'),'utf8'));
 const root=await mkdtemp(join(base,'native-tools-'));const home=join(root,'home');await mkdir(home);
-for(const name of ['runtime-bridge.cjs','model-catalog-compat.cjs','client-version-compat.cjs','feature-config-compat.cjs'])await copyFile(join(base,name),join(root,name));
+await copyBridgeFixture(root,[]);
 await writeFile(join(root,'runtime-config.json'),JSON.stringify({appServerExe:configuration.appServerExe}));
 const marker=join(home,'marker');await writeFile(marker,'before');
 const mcp=join(home,'fixture.cjs');

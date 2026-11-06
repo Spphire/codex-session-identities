@@ -47,6 +47,11 @@ Optional fourth/fifth arguments select an exact backend executable and model, e.
 
 ## Package
 
+`payload-files.json` is the canonical runtime-file inventory. Both release staging
+and panel updates read it through `payload-files.ps1`; add a new runtime module or
+browser asset there with its `panelUpdate` flag. Node dependency-closure tests
+reject missing runtime modules. Always use a new output directory for a build.
+
 Read-only real official-usage QA: `node test/real-official-usage-smoke.mjs <installation>`. This performs no model inference, verifies that registered official accounts each return quota data, and checks that original auth-file hashes are unchanged. Its output contains real quota/credit values; keep it private. The optional browser QA also checks quota bars and Credits labels with synthetic values.
 
 ```powershell
@@ -71,3 +76,28 @@ The eighth native patch adds thread/browser/read and thread/browser/reload. Afte
 
 
 The ninth patch replaces persistent fork identity coupling with one-time identity inheritance. Run test/fork-independent-identity-smoke.mjs <candidate> for an active fork with a legacy parentThreadId binding; its loopback server records actual per-request credentials while the root switches independently. Passing <old-candidate> legacy reproduces the previous blocker. The side-chat and ephemeral-fork fixtures now assert independent ordinary-fork accounts. The blocker fixture asserts a fork's background terminal does not block the root, while the same terminal still blocks switching its own session.
+
+## Audit regression commands
+
+Use Node 24 or later (the full package ships it). A machine's unrelated Node 20
+installation cannot run the SQLite tests. Run these from the repository root:
+
+```powershell
+npm test
+node --test test/bridge-health-smoke.mjs
+node test/native-audit-checks.mjs <paired-backend.exe> <new-report-directory>
+node test/windows-audit-checks.mjs <staged-payload> <new-fixture-directory>
+node test/package-update-smoke.mjs <full-release-directory> <small-update-directory> <new-fixture-directory>
+node test/patch-replay-smoke.mjs <upstream-repository> <new-report-directory>
+node test/panel-ui-smoke.mjs <screenshots>
+node test/api-identity-ui-smoke.mjs <screenshots>
+node test/ui-selection-smoke.mjs
+```
+
+Native checks use loopback models and synthetic credentials. The Windows runner
+uses Windows PowerShell's own module path and fixture-owned processes. Package
+update verification requires Git history at `d9727e7`, copies that baseline into
+an isolated installation, and proves both rollback and a successful small update.
+The Node runtime is hard-linked inside that same-volume fixture to limit disk use.
+The native runner accepts optional case names after its two positional arguments
+when retrying a failed fixture. Keep original failed reports alongside reruns.

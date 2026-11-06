@@ -1,42 +1,16 @@
 param([Parameter(Mandatory=$true)][string]$PatchedAppServer,[Parameter(Mandatory=$true)][string]$BackendRuntimeDirectory,[Parameter(Mandatory=$true)][string]$OutputDirectory,[string]$NodeExecutable=(Get-Command node).Source)
 $ErrorActionPreference='Stop'
 $OutputDirectory=$ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($OutputDirectory)
+if(Test-Path -LiteralPath $OutputDirectory){throw 'Use a new output directory to avoid retaining stale files'}
 $payload=Join-Path $OutputDirectory 'payload'
 New-Item -ItemType Directory -Path $payload -Force|Out-Null
-$files=@('server.mjs','catalog.mjs','bindings.mjs','switch-coordinator.mjs','bridge-client.mjs','runtime-bridge.cjs','runtime-status.mjs','stdio-client.mjs','open-panel.mjs','import-profiles.mjs','register-system-official.mjs','official-vault.ps1','export-compat.mjs','Launch-Codex.ps1','Disable.ps1','codex-identity.exe','codex-identity-credential.exe','identity-panel.exe','package.json')
-$files+='model-catalog-compat.cjs'
-$files+='client-version-compat.cjs'
-$files+='feature-config-compat.cjs'
-$files+='tool-health.mjs'
-$files+='repair-browser-runtime.mjs'
-$files+='desktop-browser-health.mjs'
-$files+='terminal-switch.mjs'
-$files+='api-identities.mjs'
-$files+=@('USER-GUIDE.md','PERFORMANCE.md','VALIDATION.md','CHANGELOG.md')
-$files+='identity-management.mjs'
-$files+='official-login.mjs'
-$files+='official-usage.mjs'
-$files+='Update-Panel.ps1'
-$files+='Open-PanelWindow.ps1'
-$files+='codex-session-desktop.exe'
-$files+='identity-tray.exe'
-$files+='register-second-official.mjs'
-$files+='launcher-permissions.ps1'
-$files+='Install-Shortcuts.ps1'
-$files+='resolve-installation.ps1'
-$files+='launch-process.ps1'
-$files+='package-launch-helper.ps1'
-$files+='compatibility-probe.mjs'
-$files+='Test-DesktopCompatibility.ps1'
-$files+='runtime-bundle.ps1'
-$files+='runtime-companions.cjs'
-$files+='execution-probe.mjs'
-$files+='official-profile-credential.mjs'
-$files+='ensure-provider-aliases.mjs'
-$files+='execution-policy.cjs'
-$files+='bridge-health.mjs'
-foreach($name in $files){Copy-Item -LiteralPath (Join-Path $PSScriptRoot $name) -Destination (Join-Path $payload $name) -Force}
-Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'public') -Destination $payload -Recurse -Force
+. (Join-Path $PSScriptRoot 'payload-files.ps1')
+$files=@(Get-IdentityPayloadFiles -Source $PSScriptRoot)
+foreach($name in $files){
+    $destination=Join-Path $payload $name
+    New-Item -ItemType Directory -Path (Split-Path -Parent $destination) -Force|Out-Null
+    Copy-Item -LiteralPath (Join-Path $PSScriptRoot $name) -Destination $destination -Force
+}
 Copy-Item -LiteralPath $PatchedAppServer -Destination (Join-Path $payload 'codex-app-server.exe') -Force
 $paired=Get-Content -LiteralPath (Join-Path $BackendRuntimeDirectory 'manifest.json') -Raw -Encoding UTF8|ConvertFrom-Json
 if((Get-FileHash -LiteralPath $PatchedAppServer).Hash -ne $paired.'codex-app-server.exe'){throw 'Backend runtime manifest does not match the release backend'}
