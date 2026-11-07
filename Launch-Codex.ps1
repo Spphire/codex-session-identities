@@ -112,8 +112,6 @@ try{
     $configuration=Get-Content (Join-Path $PSScriptRoot 'runtime-config.json') -Raw -Encoding UTF8|ConvertFrom-Json
     if($configuration.networkProxyUrl){
         if($configuration.networkProxyUrl -notmatch '^https?://127\.0\.0\.1:\d{1,5}$'){throw 'Configured networkProxyUrl must be a local HTTP proxy URL'}
-        foreach($name in @('HTTP_PROXY','HTTPS_PROXY','ALL_PROXY','http_proxy','https_proxy','all_proxy')){[Environment]::SetEnvironmentVariable($name,[string]$configuration.networkProxyUrl)}
-        foreach($name in @('NO_PROXY','no_proxy')){[Environment]::SetEnvironmentVariable($name,'127.0.0.1,localhost')}
     }
     . (Join-Path $PSScriptRoot 'resolve-installation.ps1')
     $configuration=Resolve-CodexInstallation $configuration $PSScriptRoot

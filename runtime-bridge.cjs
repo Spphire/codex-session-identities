@@ -38,6 +38,12 @@ function startBridge() {
   if(config.backendRuntimeManifest)require('./runtime-companions.cjs').verifyBackendRuntime(config);
   const serverArgs=config.appServerExe ? originalArgs.filter(x=>x!=='app-server' && x!=='--analytics-default-enabled') : originalArgs;
   const backendEnv={...process.env};
+  if(config.networkProxyUrl){
+    // Keep Desktop↔bridge local IPC/WebSockets direct. Only the native backend
+    // inherits the external HTTP proxy used for model/auth traffic.
+    for(const key of ['HTTP_PROXY','HTTPS_PROXY','ALL_PROXY','http_proxy','https_proxy','all_proxy'])backendEnv[key]=config.networkProxyUrl;
+    for(const key of ['NO_PROXY','no_proxy'])backendEnv[key]='127.0.0.1,localhost';
+  }
   if(config.appServerExe && config.originalCodexExe){
     const version=spawnSync(config.originalCodexExe,['--version'],{encoding:'utf8',windowsHide:true,timeout:10000});
     const match=version.status===0 && /^codex-cli (\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)\s*$/.exec(version.stdout.trim());
