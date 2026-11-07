@@ -146,6 +146,10 @@
       "panelUpdate": true
     },
     {
+      "path": "installer-config.ps1",
+      "panelUpdate": false
+    },
+    {
       "path": "launch-process.ps1",
       "panelUpdate": true
     },

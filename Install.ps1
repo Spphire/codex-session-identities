@@ -2,6 +2,10 @@ param([string]$InstallDirectory=(Join-Path ([Environment]::GetFolderPath('MyDocu
 $ErrorActionPreference='Stop'
 [Console]::OutputEncoding=[Text.UTF8Encoding]::new($false)
 $OutputEncoding=[Text.UTF8Encoding]::new($false)
+$configPath=Join-Path $InstallDirectory 'runtime-config.json';$previousConfiguration=$null
+if(Test-Path -LiteralPath $configPath){try{$previousConfiguration=Get-Content -LiteralPath $configPath -Raw -Encoding UTF8|ConvertFrom-Json}catch{throw 'Existing runtime-config.json is invalid; back it up and repair it before installing.'}}
+if(!$PSBoundParameters.ContainsKey('CodexHome') -and $previousConfiguration -and $previousConfiguration.codexHome){$CodexHome=[string]$previousConfiguration.codexHome}
+. (Join-Path $PSScriptRoot 'installer-config.ps1')
 if(!$CodexExe){$CodexExe=Get-ChildItem (Join-Path $env:LOCALAPPDATA 'OpenAI\Codex\bin') -Filter codex.exe -Recurse -ErrorAction SilentlyContinue|Sort-Object LastWriteTime -Descending|Select-Object -First 1 -ExpandProperty FullName}
 if(!$DesktopExe){$package=Get-AppxPackage -Name OpenAI.Codex|Select-Object -First 1;if($package){$DesktopExe=Join-Path $package.InstallLocation 'app\ChatGPT.exe'}}
 if(!$CodexExe -or !(Test-Path -LiteralPath $CodexExe)){throw 'Pass -CodexExe with the installed Codex CLI path.'}
@@ -28,7 +32,8 @@ if(Test-Path -LiteralPath $trayPath){
         foreach($tray in $trayProcesses){Wait-Process -Id $tray.ProcessId -Timeout 5 -ErrorAction SilentlyContinue;if(Get-Process -Id $tray.ProcessId -ErrorAction SilentlyContinue){throw 'Tray has not exited; close it before updating.'}}
     }
 }
-$accessFile=Join-Path $CodexHome 'session-identities\panel-access-18189.json'
+$oldPort=if($previousConfiguration -and [int]$previousConfiguration.panelPort -ge 1024){[int]$previousConfiguration.panelPort}else{18189}
+$accessFile=Join-Path $CodexHome ('session-identities\panel-access-'+$oldPort+'.json')
 if(Test-Path -LiteralPath $accessFile){
     $access=Get-Content -LiteralPath $accessFile -Raw|ConvertFrom-Json
     $panel=Get-CimInstance Win32_Process -Filter ('ProcessId='+$access.pid)
@@ -36,10 +41,9 @@ if(Test-Path -LiteralPath $accessFile){
 }
 New-Item -ItemType Directory -Path $InstallDirectory -Force|Out-Null
 Copy-Item -Path (Join-Path $payload '*') -Destination $InstallDirectory -Recurse -Force
-$configuration=@{originalCodexExe=$CodexExe;appServerExe=(Join-Path $InstallDirectory 'codex-app-server.exe');desktopExe=$DesktopExe;codexHome=$CodexHome;panelPort=18189;integrationTests=$false;managePermissions=$true;upstreamCommit='0c7362d121d1c7f69540262425fd4e2209fd8e8d'}
-$configuration.backendRuntimeManifest=Join-Path $InstallDirectory 'backend-runtime\manifest.json'
-$configuration.identityForceRevision=1
-[IO.File]::WriteAllText((Join-Path $InstallDirectory 'runtime-config.json'),($configuration|ConvertTo-Json),[Text.UTF8Encoding]::new($false))
+$configuration=New-IdentityRuntimeConfiguration $previousConfiguration $CodexExe $DesktopExe $InstallDirectory $CodexHome
+if(Test-Path -LiteralPath $configPath){New-Item -ItemType Directory -Force (Join-Path $InstallDirectory 'backups')|Out-Null;Copy-Item -LiteralPath $configPath -Destination (Join-Path $InstallDirectory ('backups\runtime-config-before-install-'+[DateTime]::UtcNow.ToString('yyyyMMddHHmmssfff')+'.json')) -Force}
+[IO.File]::WriteAllText($configPath,($configuration|ConvertTo-Json -Depth 12),[Text.UTF8Encoding]::new($false))
 $env:CODEX_HOME=$CodexHome
 $node=Join-Path $InstallDirectory 'node.exe'
 if(Test-Path -LiteralPath (Join-Path $CodexHome 'auth.json')){

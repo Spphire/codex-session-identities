@@ -1,7 +1,14 @@
+if(Test-Path -LiteralPath (Join-Path $PSScriptRoot 'installer-config.ps1')){. (Join-Path $PSScriptRoot 'installer-config.ps1')}
+if(!(Get-Command Normalize-IdentityPath -ErrorAction SilentlyContinue)){
+    function Normalize-IdentityPath([string]$Value){if(!$Value){return $Value};$one=[string][char]92;$two=$one+$one;$normalized=$Value;while($normalized.Contains($two)){$normalized=$normalized.Replace($two,$one)};if(![IO.Path]::IsPathRooted($normalized)){return $normalized};try{return [IO.Path]::GetFullPath($normalized)}catch{return $normalized}}
+}
 function Resolve-CodexInstallation([object]$Configuration, [string]$Installation) {
     $changed=$false
     $oldDesktop=$Configuration.desktopExe
     $oldCli=$Configuration.originalCodexExe
+    foreach($name in @('desktopExe','originalCodexExe','appServerExe','codexHome','backendRuntimeManifest')){
+        if($Configuration.PSObject.Properties.Name -contains $name -and $Configuration.$name){$normalized=Normalize-IdentityPath ([string]$Configuration.$name);if($Configuration.$name -ne $normalized){$Configuration.$name=$normalized;$changed=$true}}
+    }
     # Resolve both executables from the registered package, even if old files remain.
     $package=$null
     # Respect explicit portable/custom Desktop paths used by separate installations.

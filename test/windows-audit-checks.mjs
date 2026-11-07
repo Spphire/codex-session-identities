@@ -12,7 +12,7 @@ await mkdir(output,{recursive:true});
 const cases=[
   ['launch-error-check',[]],['package-launch-check',[]],['launcher-permissions-check',[]],
   ['launcher-update-ownership-check',['-Installation',installation]],
-  ...['panel-elevation-check','panel-update-ownership-check','installation-discovery-check','runtime-bundle-check'].map(name=>[name,['-FixtureDirectory',join(output,name)]]),
+  ...['installer-config-check','panel-elevation-check','panel-update-ownership-check','installation-discovery-check','runtime-bundle-check'].map(name=>[name,['-FixtureDirectory',join(output,name)]]),
   ['launcher-restart-integration',['-Installation',installation,'-FixtureDirectory',join(output,'restart')]],
   ['launcher-restart-integration',['-Installation',installation,'-FixtureDirectory',join(output,'rejection'),'-RejectCompatibility']],
 ];
