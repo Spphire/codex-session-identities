@@ -17,7 +17,32 @@ export async function repairBrowserRuntime({codexHome,resourcesDirectory,runtime
     if(['mcp_servers.node_repl','mcp_servers.node_repl.env'].includes(section)&&allowed.has(key)&&pattern.test(line))candidates.push(index);
   }
   if(!candidates.length)return {passed:true,changed:false};
-  const expected=await readFile(join(resourcesDirectory,'cua_node','manifest.json'),'utf8');const matches=[];
+  // Official Desktop layouts differ across updates: older CLI bundles place
+  // cua_node under the hashed bin directory, while newer Desktop stores it in
+  // LOCALAPPDATA\OpenAI\Codex\runtimes. Accept only an exact manifest from
+  // one of those two owned locations.
+  let expected=null;
+  for(const candidate of [join(resourcesDirectory,'cua_node','manifest.json'),join(runtimesDirectory,'manifest.json')]){
+    try{expected=await readFile(candidate,'utf8');break}catch(error){if(error.code!=='ENOENT')throw error}
+  }
+  if(expected===null){
+    // Newer Desktop installs keep only per-version manifests. Select the
+    // uniquely complete runtime; incomplete stale downloads are ignored.
+    const candidates=[];
+    for(const entry of await readdir(runtimesDirectory,{withFileTypes:true}).catch(()=>[])){
+      if(!entry.isDirectory()||!/^[a-f0-9]{16}$/i.test(entry.name))continue;
+      const directory=join(runtimesDirectory,entry.name);
+      try{
+        const manifest=await readFile(join(directory,'manifest.json'),'utf8');
+        for(const name of ['node.exe','node_repl.exe'])if(!(await stat(join(directory,'bin',name))).isFile())throw Error('incomplete');
+        if(!(await stat(join(directory,'bin','node_modules'))).isDirectory())throw Error('incomplete');
+        candidates.push(manifest);
+      }catch{}
+    }
+    if(candidates.length===1)expected=candidates[0];
+  }
+  if(expected===null)throw new Error('Cannot locate the installed Codex browser runtime manifest. Finish the official Desktop browser setup and retry.');
+  const matches=[];
   for(const entry of await readdir(runtimesDirectory,{withFileTypes:true})){
     if(!entry.isDirectory()||!/^[a-f0-9]{16}$/i.test(entry.name))continue;
     const directory=join(runtimesDirectory,entry.name);
@@ -86,6 +111,10 @@ export async function repairBrowserRuntime({codexHome,resourcesDirectory,runtime
 if(process.argv[1]&&resolve(process.argv[1])===fileURLToPath(import.meta.url)){
   try{
     const root=resolve(process.argv[2]);const config=JSON.parse(await readFile(join(root,'runtime-config.json'),'utf8'));
-    console.log(JSON.stringify(await repairBrowserRuntime({codexHome:config.codexHome,resourcesDirectory:dirname(config.originalCodexExe),runtimesDirectory:join(process.env.LOCALAPPDATA,'OpenAI','Codex','runtimes','cua_node')})));
+    // Elevated shortcuts can omit LOCALAPPDATA. Derive the official Codex
+    // runtime root from the hashed CLI bin path in that case.
+    const localAppData=process.env.LOCALAPPDATA||resolve(dirname(config.originalCodexExe),'..','..');
+    const runtimesDirectory=join(localAppData,'OpenAI','Codex','runtimes','cua_node');
+    console.log(JSON.stringify(await repairBrowserRuntime({codexHome:config.codexHome,resourcesDirectory:dirname(config.originalCodexExe),runtimesDirectory})));
   }catch(error){console.log(JSON.stringify({passed:false,error:error.message}));process.exitCode=1;}
 }

@@ -36,3 +36,19 @@ test('browser paths follow only the matching official runtime and preserve custo
     assert.equal((await repairBrowserRuntime(options)).changed,false);
   }finally{await rm(root,{recursive:true,force:true})}
 });
+
+test('browser paths accept the split runtime layout used by newer Desktop updates',async()=>{
+  const root=await mkdtemp(join(tmpdir(),'browser-split-runtime-'));
+  try{
+    const codexHome=join(root,'home'),resourcesDirectory=join(root,'hashed-bin'),runtimesDirectory=join(root,'runtimes','cua_node');
+    const runtime=join(runtimesDirectory,'2222222222222222');
+    await mkdir(codexHome,{recursive:true});await mkdir(join(runtime,'bin','node_modules'),{recursive:true});
+    for(const file of ['node.exe','node_repl.exe'])await writeFile(join(runtime,'bin',file),'fixture');
+    // New Desktop stores only the selected runtime's manifest, without a
+    // top-level cua_node manifest.
+    await writeFile(join(runtime,'manifest.json'),'split-manifest');
+    const file=join(codexHome,'config.toml');await writeFile(file,`[mcp_servers.node_repl]\ncommand='${runtimesDirectory}/0000000000000000/bin/node_repl.exe'\nargs=[]\n[mcp_servers.node_repl.env]\nNODE_REPL_NODE_PATH='${runtimesDirectory}/0000000000000000/bin/node.exe'\n`);
+    const result=await repairBrowserRuntime({codexHome,resourcesDirectory,runtimesDirectory});
+    assert.equal(result.changedKeys,2);assert.match(await readFile(file,'utf8'),/2222222222222222/);
+  }finally{await rm(root,{recursive:true,force:true})}
+});
