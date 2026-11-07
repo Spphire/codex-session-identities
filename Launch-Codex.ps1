@@ -171,7 +171,9 @@ try{
         Stop-CodexRestartProcesses $restartProcesses
     }
     Write-LauncherStatus 'starting_desktop' @{}
-    $desktop=Start-IdentityDesktop -DesktopExe $configuration.desktopExe -Installation $PSScriptRoot
+    $desktopArguments=''
+    if($configuration.networkProxyUrl){$desktopArguments='--proxy-server="'+[string]$configuration.networkProxyUrl+'" --proxy-bypass-list="127.0.0.1;localhost;<local>"'}
+    $desktop=Start-IdentityDesktop -DesktopExe $configuration.desktopExe -Installation $PSScriptRoot -Arguments $desktopArguments
     $deadline=[DateTime]::UtcNow.AddSeconds(35)
     $verified=$false
     do{
