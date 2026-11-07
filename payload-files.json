@@ -30,6 +30,14 @@
       "panelUpdate": true
     },
     {
+      "path": "Start-RemoteNetworkForward.ps1",
+      "panelUpdate": true
+    },
+    {
+      "path": "Stop-RemoteNetworkForward.ps1",
+      "panelUpdate": true
+    },
+    {
       "path": "Test-DesktopCompatibility.ps1",
       "panelUpdate": true
     },
@@ -144,6 +152,10 @@
     {
       "path": "launcher-permissions.ps1",
       "panelUpdate": false
+    },
+    {
+      "path": "local-connect-proxy.mjs",
+      "panelUpdate": true
     },
     {
       "path": "model-catalog-compat.cjs",

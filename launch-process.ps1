@@ -26,7 +26,7 @@ function Start-IdentityPackageContext([string]$DesktopExe,[string]$Installation,
     # Package activation does not inherit our environment. Transfer only launcher
     # configuration paths, never credentials or the caller's full environment.
     $environment=@{}
-    foreach($name in @('CODEX_HOME','CODEX_SQLITE_HOME','CODEX_CLI_PATH','CODEX_ELECTRON_USER_DATA_PATH','IDENTITY_PANEL_PORT','RUST_MIN_STACK')){
+    foreach($name in @('CODEX_HOME','CODEX_SQLITE_HOME','CODEX_CLI_PATH','CODEX_ELECTRON_USER_DATA_PATH','IDENTITY_PANEL_PORT','RUST_MIN_STACK','HTTP_PROXY','HTTPS_PROXY','ALL_PROXY','http_proxy','https_proxy','all_proxy','NO_PROXY','no_proxy')){
         $environment[$name]=[Environment]::GetEnvironmentVariable($name)
     }
     $value=@{desktopExe=$DesktopExe;installation=$Installation;arguments=$Arguments;probe=[bool]$Probe;environment=$environment}

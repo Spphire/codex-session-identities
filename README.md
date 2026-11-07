@@ -12,6 +12,13 @@ See [USER-GUIDE.md](USER-GUIDE.md) for installation, identity registration, swit
 
 The maintained module boundaries and refactoring rules are documented in [ARCHITECTURE.md](ARCHITECTURE.md).
 
+For a remote Windows deployment that should use the local machine's network,
+run `Start-RemoteNetworkForward.ps1` on the local machine and set the remote
+identity installation's `networkProxyUrl` to the reported local HTTP proxy URL.
+The launcher applies proxy variables only to Codex started through the identity
+shortcut; other remote applications keep their normal network. Stop the tunnel
+with `Stop-RemoteNetworkForward.ps1` when it is no longer needed.
+
 ## Features
 
 - Independent official and API identities per chat; system official login and separately registered official accounts.

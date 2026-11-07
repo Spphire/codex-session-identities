@@ -3,7 +3,7 @@ $ErrorActionPreference='Stop'
 $response=Join-Path (Split-Path -Parent $RequestPath) 'result.json'
 try{
     $request=Get-Content -LiteralPath $RequestPath -Raw -Encoding UTF8|ConvertFrom-Json
-    foreach($name in @('CODEX_HOME','CODEX_SQLITE_HOME','CODEX_CLI_PATH','CODEX_ELECTRON_USER_DATA_PATH','IDENTITY_PANEL_PORT','RUST_MIN_STACK')){
+    foreach($name in @('CODEX_HOME','CODEX_SQLITE_HOME','CODEX_CLI_PATH','CODEX_ELECTRON_USER_DATA_PATH','IDENTITY_PANEL_PORT','RUST_MIN_STACK','HTTP_PROXY','HTTPS_PROXY','ALL_PROXY','http_proxy','https_proxy','all_proxy','NO_PROXY','no_proxy')){
         [Environment]::SetEnvironmentVariable($name,$request.environment.$name)
     }
     if($request.probe){foreach($key in @([Environment]::GetEnvironmentVariables().Keys)){if($key -match 'TOKEN|API_KEY|PASSWORD|SECRET'){[Environment]::SetEnvironmentVariable($key,$null)}}}
